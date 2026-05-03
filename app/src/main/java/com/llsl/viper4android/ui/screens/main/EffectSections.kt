@@ -48,6 +48,7 @@ import com.llsl.viper4android.ui.components.EqEditDialog
 import com.llsl.viper4android.ui.components.LabeledDropdown
 import com.llsl.viper4android.ui.components.LabeledSlider
 import com.llsl.viper4android.ui.components.LabeledSwitch
+import java.util.Locale
 import kotlin.math.log10
 import kotlin.math.roundToInt
 
@@ -202,13 +203,15 @@ fun FetCompressorSection(state: MainUiState, viewModel: MainViewModel, isSpkMode
             label = stringResource(R.string.label_fet_threshold),
             value = threshold.toFloat(),
             onValueChange = { onThresholdChange(it.roundToInt()) },
-            valueRange = 0f..200f
+            valueRange = -48f..0f,
+            valueLabel = "$threshold dB"
         )
         LabeledSlider(
             label = stringResource(R.string.label_fet_ratio),
-            value = ratio.toFloat(),
-            onValueChange = { onRatioChange(it.roundToInt()) },
-            valueRange = 0f..200f
+            value = ratio / 100f,
+            onValueChange = { onRatioChange((it * 100f).roundToInt()) },
+            valueRange = 0f..2f,
+            valueLabel = String.format(Locale.US, "%.2f", ratio / 100.0)
         )
         LabeledSwitch(
             label = stringResource(R.string.label_fet_auto_knee),
@@ -219,14 +222,16 @@ fun FetCompressorSection(state: MainUiState, viewModel: MainViewModel, isSpkMode
             label = stringResource(R.string.label_fet_knee),
             value = knee.toFloat(),
             onValueChange = { onKneeChange(it.roundToInt()) },
-            valueRange = 0f..200f,
-            enabled = !autoKnee
+            valueRange = 0f..12f,
+            enabled = !autoKnee,
+            valueLabel = "$knee dB"
         )
         LabeledSlider(
             label = stringResource(R.string.label_fet_knee_multi),
-            value = kneeMulti.toFloat(),
-            onValueChange = { onKneeMultiChange(it.roundToInt()) },
-            valueRange = 0f..200f
+            value = (kneeMulti / 100f * 4f),
+            onValueChange = { onKneeMultiChange((it / 4f * 100f).roundToInt()) },
+            valueRange = 0f..4f,
+            valueLabel = String.format(Locale.US, "%.2fx", kneeMulti / 100.0 * 4.0)
         )
         LabeledSwitch(
             label = stringResource(R.string.label_fet_auto_gain),
@@ -237,8 +242,9 @@ fun FetCompressorSection(state: MainUiState, viewModel: MainViewModel, isSpkMode
             label = stringResource(R.string.label_fet_gain),
             value = gain.toFloat(),
             onValueChange = { onGainChange(it.roundToInt()) },
-            valueRange = 0f..200f,
-            enabled = !autoGain
+            valueRange = 0f..24f,
+            enabled = !autoGain,
+            valueLabel = "$gain dB"
         )
         LabeledSwitch(
             label = stringResource(R.string.label_fet_auto_attack),
@@ -247,16 +253,18 @@ fun FetCompressorSection(state: MainUiState, viewModel: MainViewModel, isSpkMode
         )
         LabeledSlider(
             label = stringResource(R.string.label_fet_attack),
-            value = attack.toFloat(),
+            value = attack.toFloat().coerceIn(1f, 100f),
             onValueChange = { onAttackChange(it.roundToInt()) },
-            valueRange = 0f..200f,
-            enabled = !autoAttack
+            valueRange = 1f..100f,
+            enabled = !autoAttack,
+            valueLabel = "$attack ms"
         )
         LabeledSlider(
             label = stringResource(R.string.label_fet_max_attack),
-            value = maxAttack.toFloat(),
+            value = maxAttack.toFloat().coerceIn(1f, 100f),
             onValueChange = { onMaxAttackChange(it.roundToInt()) },
-            valueRange = 0f..200f
+            valueRange = 1f..100f,
+            valueLabel = "$maxAttack ms"
         )
         LabeledSwitch(
             label = stringResource(R.string.label_fet_auto_release),
@@ -265,28 +273,32 @@ fun FetCompressorSection(state: MainUiState, viewModel: MainViewModel, isSpkMode
         )
         LabeledSlider(
             label = stringResource(R.string.label_fet_release),
-            value = release.toFloat(),
+            value = release.toFloat().coerceIn(5f, 500f),
             onValueChange = { onReleaseChange(it.roundToInt()) },
-            valueRange = 0f..200f,
-            enabled = !autoRelease
+            valueRange = 5f..500f,
+            enabled = !autoRelease,
+            valueLabel = "$release ms"
         )
         LabeledSlider(
             label = stringResource(R.string.label_fet_max_release),
-            value = maxRelease.toFloat(),
+            value = maxRelease.toFloat().coerceIn(5f, 500f),
             onValueChange = { onMaxReleaseChange(it.roundToInt()) },
-            valueRange = 0f..200f
+            valueRange = 5f..500f,
+            valueLabel = "$maxRelease ms"
         )
         LabeledSlider(
             label = stringResource(R.string.label_fet_crest),
-            value = crest.toFloat(),
+            value = crest.toFloat().coerceIn(5f, 300f),
             onValueChange = { onCrestChange(it.roundToInt()) },
-            valueRange = 0f..300f
+            valueRange = 5f..300f,
+            valueLabel = "$crest ms"
         )
         LabeledSlider(
             label = stringResource(R.string.label_fet_adapt),
             value = adapt.toFloat(),
             onValueChange = { onAdaptChange(it.roundToInt()) },
-            valueRange = 0f..200f
+            valueRange = 0f..200f,
+            valueLabel = "$adapt%"
         )
         LabeledSwitch(
             label = stringResource(R.string.label_fet_no_clip),
@@ -725,18 +737,18 @@ fun DynamicSystemSection(state: MainUiState, viewModel: MainViewModel, isSpkMode
         LabeledSlider(
             label = stringResource(R.string.label_ds_x_low_freq),
             value = xLow.toFloat(),
-            onValueChange = { onXLowChange((it / 100f).roundToInt() * 100) },
+            onValueChange = { onXLowChange(it.roundToInt()) },
             valueRange = 0f..2400f,
-            steps = 23,
+            steps = (2400 / 5) - 1,
             valueLabel = "$xLow Hz"
         )
 
         LabeledSlider(
             label = stringResource(R.string.label_ds_x_high_freq),
             value = xHigh.toFloat(),
-            onValueChange = { onXHighChange((it / 100f).roundToInt() * 100) },
+            onValueChange = { onXHighChange(it.roundToInt()) },
             valueRange = 0f..12000f,
-            steps = 119,
+            steps = (12000 / 5) - 1,
             valueLabel = "$xHigh Hz"
         )
 
@@ -745,6 +757,7 @@ fun DynamicSystemSection(state: MainUiState, viewModel: MainViewModel, isSpkMode
             value = yLow.toFloat(),
             onValueChange = { onYLowChange(it.roundToInt()) },
             valueRange = 0f..200f,
+            steps = (200 / 5) - 1,
             valueLabel = "$yLow Hz"
         )
 
@@ -753,6 +766,7 @@ fun DynamicSystemSection(state: MainUiState, viewModel: MainViewModel, isSpkMode
             value = yHigh.toFloat(),
             onValueChange = { onYHighChange(it.roundToInt()) },
             valueRange = 0f..300f,
+            steps = (300 / 5) - 1,
             valueLabel = "$yHigh Hz"
         )
 
@@ -863,6 +877,7 @@ fun ViperBassSection(state: MainUiState, viewModel: MainViewModel, isSpkMode: Bo
                 value = frequency.toFloat(),
                 onValueChange = { onFrequencyChange(it.roundToInt()) },
                 valueRange = 0f..135f,
+                steps = 134,
                 valueLabel = "${frequency + 15}Hz"
             )
         }
@@ -927,6 +942,7 @@ fun ViperBassMonoSection(state: MainUiState, viewModel: MainViewModel, isSpkMode
                 value = frequency.toFloat(),
                 onValueChange = { onFrequencyChange(it.roundToInt()) },
                 valueRange = 0f..135f,
+                steps = 134,
                 valueLabel = "${frequency + 15}Hz"
             )
         }
@@ -1038,8 +1054,8 @@ fun AnalogXSection(state: MainUiState, viewModel: MainViewModel, isSpkMode: Bool
     val vals = state.analog.forType(fxType)
     val enabled = vals.enabled
     val mode = vals.mode
-    val onEnabledChange = viewModel::setAnalogXEnabled
-    val onModeChange = viewModel::setAnalogXMode
+    val onEnabledChange = viewModel::setAnalogxEnabled
+    val onModeChange = viewModel::setAnalogxMode
 
     val modeNames = listOf(
         stringResource(R.string.analogx_mode_mild),

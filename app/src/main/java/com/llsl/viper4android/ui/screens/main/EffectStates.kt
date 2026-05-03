@@ -43,7 +43,7 @@ data class AgcState(
 
 data class FetValues(
     val enabled: Boolean = false,
-    val threshold: Int = -60,
+    val threshold: Int = -18,
     val ratio: Int = 100,
     val autoKnee: Boolean = true,
     val knee: Int = 0,

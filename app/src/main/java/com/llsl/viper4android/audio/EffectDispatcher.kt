@@ -7,8 +7,34 @@ import com.llsl.viper4android.ui.screens.main.loadEffectPrefs
 import com.llsl.viper4android.utils.FileLogger
 import kotlinx.coroutines.flow.first
 import java.util.Locale
+import kotlin.math.ln
+import kotlin.math.roundToInt
 
 object EffectDispatcher {
+
+    fun fetThresholdToRaw(dB: Int): Int = (dB / -60.0 * 100.0).roundToInt()
+    fun fetKneeToRaw(dB: Int): Int = (dB / 60.0 * 100.0).roundToInt()
+    fun fetGainToRaw(dB: Int): Int = (dB / 60.0 * 100.0).roundToInt()
+
+    fun fetAttackMsToRaw(ms: Int): Int {
+        val timeSec = ms / 1000.0
+        val value = (ln(timeSec) + 9.21034) / 7.600903
+        return (value * 100.0).roundToInt().coerceIn(0, 200)
+    }
+
+    fun fetReleaseMsToRaw(ms: Int): Int {
+        val timeSec = ms / 1000.0
+        val value = (ln(timeSec) + 5.298317) / 5.991465
+        return (value * 100.0).roundToInt().coerceIn(0, 200)
+    }
+
+    fun vseExciterToRaw(value: Int): Int = (value * 5.6).toInt()
+    fun fieldSurroundMidImageToRaw(value: Int): Int = value * 10 + 100
+    fun fieldSurroundDepthToRaw(value: Int): Int = value * 75 + 200
+    fun dynamicSystemStrengthToRaw(value: Int): Int = value * 20 + 100
+    fun bassGainToRaw(value: Int): Int = value * 50 + 50
+    fun bassFrequencyToRaw(value: Int): Int = value + 15
+    fun clarityGainToRaw(value: Int): Int = value * 50
 
     val OUTPUT_VOLUME_VALUES = intArrayOf(
         1, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100,
@@ -362,35 +388,56 @@ object EffectDispatcher {
             ViperParams.PARAM_HP_FET_COMPRESSOR_ENABLE,
             if (state.fet.hp.enabled) 100 else 0
         )
-        effect.setParameter(ViperParams.PARAM_HP_FET_COMPRESSOR_THRESHOLD, state.fet.hp.threshold)
+        effect.setParameter(
+            ViperParams.PARAM_HP_FET_COMPRESSOR_THRESHOLD,
+            fetThresholdToRaw(state.fet.hp.threshold)
+        )
         effect.setParameter(ViperParams.PARAM_HP_FET_COMPRESSOR_RATIO, state.fet.hp.ratio)
         effect.setParameter(
             ViperParams.PARAM_HP_FET_COMPRESSOR_AUTO_KNEE,
             if (state.fet.hp.autoKnee) 100 else 0
         )
-        effect.setParameter(ViperParams.PARAM_HP_FET_COMPRESSOR_KNEE, state.fet.hp.knee)
+        effect.setParameter(
+            ViperParams.PARAM_HP_FET_COMPRESSOR_KNEE,
+            fetKneeToRaw(state.fet.hp.knee)
+        )
         effect.setParameter(ViperParams.PARAM_HP_FET_COMPRESSOR_KNEE_MULTI, state.fet.hp.kneeMulti)
         effect.setParameter(
             ViperParams.PARAM_HP_FET_COMPRESSOR_AUTO_GAIN,
             if (state.fet.hp.autoGain) 100 else 0
         )
-        effect.setParameter(ViperParams.PARAM_HP_FET_COMPRESSOR_GAIN, state.fet.hp.gain)
+        effect.setParameter(
+            ViperParams.PARAM_HP_FET_COMPRESSOR_GAIN,
+            fetGainToRaw(state.fet.hp.gain)
+        )
         effect.setParameter(
             ViperParams.PARAM_HP_FET_COMPRESSOR_AUTO_ATTACK,
             if (state.fet.hp.autoAttack) 100 else 0
         )
-        effect.setParameter(ViperParams.PARAM_HP_FET_COMPRESSOR_ATTACK, state.fet.hp.attack)
-        effect.setParameter(ViperParams.PARAM_HP_FET_COMPRESSOR_MAX_ATTACK, state.fet.hp.maxAttack)
+        effect.setParameter(
+            ViperParams.PARAM_HP_FET_COMPRESSOR_ATTACK,
+            fetAttackMsToRaw(state.fet.hp.attack)
+        )
+        effect.setParameter(
+            ViperParams.PARAM_HP_FET_COMPRESSOR_MAX_ATTACK,
+            fetAttackMsToRaw(state.fet.hp.maxAttack)
+        )
         effect.setParameter(
             ViperParams.PARAM_HP_FET_COMPRESSOR_AUTO_RELEASE,
             if (state.fet.hp.autoRelease) 100 else 0
         )
-        effect.setParameter(ViperParams.PARAM_HP_FET_COMPRESSOR_RELEASE, state.fet.hp.release)
+        effect.setParameter(
+            ViperParams.PARAM_HP_FET_COMPRESSOR_RELEASE,
+            fetReleaseMsToRaw(state.fet.hp.release)
+        )
         effect.setParameter(
             ViperParams.PARAM_HP_FET_COMPRESSOR_MAX_RELEASE,
-            state.fet.hp.maxRelease
+            fetReleaseMsToRaw(state.fet.hp.maxRelease)
         )
-        effect.setParameter(ViperParams.PARAM_HP_FET_COMPRESSOR_CREST, state.fet.hp.crest)
+        effect.setParameter(
+            ViperParams.PARAM_HP_FET_COMPRESSOR_CREST,
+            fetReleaseMsToRaw(state.fet.hp.crest)
+        )
         effect.setParameter(ViperParams.PARAM_HP_FET_COMPRESSOR_ADAPT, state.fet.hp.adapt)
         effect.setParameter(
             ViperParams.PARAM_HP_FET_COMPRESSOR_NO_CLIP,
@@ -410,7 +457,7 @@ object EffectDispatcher {
             VSE_BARK_VALUES.getOrElse(state.vse.hp.strength) { 7600 })
         effect.setParameter(
             ViperParams.PARAM_HP_SPECTRUM_EXTENSION_BARK_RECONSTRUCT,
-            (state.vse.hp.exciter * 5.6).toInt()
+            vseExciterToRaw(state.vse.hp.exciter)
         )
 
         effect.setParameter(ViperParams.PARAM_HP_EQ_BAND_COUNT, state.eq.hp.bandCount)
@@ -444,11 +491,11 @@ object EffectDispatcher {
             FIELD_SURROUND_WIDENING_VALUES.getOrElse(state.fieldSurround.hp.widening) { 0 })
         effect.setParameter(
             ViperParams.PARAM_HP_FIELD_SURROUND_MID_IMAGE,
-            state.fieldSurround.hp.midImage * 10 + 100
+            fieldSurroundMidImageToRaw(state.fieldSurround.hp.midImage)
         )
         effect.setParameter(
             ViperParams.PARAM_HP_FIELD_SURROUND_DEPTH,
-            state.fieldSurround.hp.depth * 75 + 200
+            fieldSurroundDepthToRaw(state.fieldSurround.hp.depth)
         )
 
         effect.setParameter(
@@ -509,8 +556,11 @@ object EffectDispatcher {
         effect.setParameter(ViperParams.PARAM_HP_BASS_ENABLE, if (state.bass.hp.enabled) 1 else 0)
         FileLogger.d("Dispatch", "Bass: ${if (state.bass.hp.enabled) "ON" else "OFF"}")
         effect.setParameter(ViperParams.PARAM_HP_BASS_MODE, state.bass.hp.mode)
-        effect.setParameter(ViperParams.PARAM_HP_BASS_FREQUENCY, state.bass.hp.frequency + 15)
-        effect.setParameter(ViperParams.PARAM_HP_BASS_GAIN, state.bass.hp.gain * 50 + 50)
+        effect.setParameter(
+            ViperParams.PARAM_HP_BASS_FREQUENCY,
+            bassFrequencyToRaw(state.bass.hp.frequency)
+        )
+        effect.setParameter(ViperParams.PARAM_HP_BASS_GAIN, bassGainToRaw(state.bass.hp.gain))
         effect.setParameter(ViperParams.PARAM_HP_BASS_ANTI_POP, if (state.bass.hp.antiPop) 1 else 0)
 
         effect.setParameter(
@@ -521,9 +571,12 @@ object EffectDispatcher {
         effect.setParameter(ViperParams.PARAM_HP_BASS_MONO_MODE, state.bassMono.hp.mode)
         effect.setParameter(
             ViperParams.PARAM_HP_BASS_MONO_FREQUENCY,
-            state.bassMono.hp.frequency + 15
+            bassFrequencyToRaw(state.bassMono.hp.frequency)
         )
-        effect.setParameter(ViperParams.PARAM_HP_BASS_MONO_GAIN, state.bassMono.hp.gain * 50 + 50)
+        effect.setParameter(
+            ViperParams.PARAM_HP_BASS_MONO_GAIN,
+            bassGainToRaw(state.bassMono.hp.gain)
+        )
         effect.setParameter(
             ViperParams.PARAM_HP_BASS_MONO_ANTI_POP,
             if (state.bassMono.hp.antiPop) 1 else 0
@@ -535,7 +588,10 @@ object EffectDispatcher {
         )
         FileLogger.d("Dispatch", "Clarity: ${if (state.clarity.hp.enabled) "ON" else "OFF"}")
         effect.setParameter(ViperParams.PARAM_HP_CLARITY_MODE, state.clarity.hp.mode)
-        effect.setParameter(ViperParams.PARAM_HP_CLARITY_GAIN, state.clarity.hp.gain * 50)
+        effect.setParameter(
+            ViperParams.PARAM_HP_CLARITY_GAIN,
+            clarityGainToRaw(state.clarity.hp.gain)
+        )
 
         effect.setParameter(ViperParams.PARAM_HP_CURE_ENABLE, if (state.cure.hp.enabled) 1 else 0)
         FileLogger.d("Dispatch", "Cure: ${if (state.cure.hp.enabled) "ON" else "OFF"}")
@@ -579,13 +635,19 @@ object EffectDispatcher {
             if (state.fet.spk.enabled) 100 else 0
         )
         FileLogger.d("Dispatch", "FET: ${if (state.fet.spk.enabled) "ON" else "OFF"}")
-        effect.setParameter(ViperParams.PARAM_SPK_FET_COMPRESSOR_THRESHOLD, state.fet.spk.threshold)
+        effect.setParameter(
+            ViperParams.PARAM_SPK_FET_COMPRESSOR_THRESHOLD,
+            fetThresholdToRaw(state.fet.spk.threshold)
+        )
         effect.setParameter(ViperParams.PARAM_SPK_FET_COMPRESSOR_RATIO, state.fet.spk.ratio)
         effect.setParameter(
             ViperParams.PARAM_SPK_FET_COMPRESSOR_AUTO_KNEE,
             if (state.fet.spk.autoKnee) 100 else 0
         )
-        effect.setParameter(ViperParams.PARAM_SPK_FET_COMPRESSOR_KNEE, state.fet.spk.knee)
+        effect.setParameter(
+            ViperParams.PARAM_SPK_FET_COMPRESSOR_KNEE,
+            fetKneeToRaw(state.fet.spk.knee)
+        )
         effect.setParameter(
             ViperParams.PARAM_SPK_FET_COMPRESSOR_KNEE_MULTI,
             state.fet.spk.kneeMulti
@@ -594,26 +656,38 @@ object EffectDispatcher {
             ViperParams.PARAM_SPK_FET_COMPRESSOR_AUTO_GAIN,
             if (state.fet.spk.autoGain) 100 else 0
         )
-        effect.setParameter(ViperParams.PARAM_SPK_FET_COMPRESSOR_GAIN, state.fet.spk.gain)
+        effect.setParameter(
+            ViperParams.PARAM_SPK_FET_COMPRESSOR_GAIN,
+            fetGainToRaw(state.fet.spk.gain)
+        )
         effect.setParameter(
             ViperParams.PARAM_SPK_FET_COMPRESSOR_AUTO_ATTACK,
             if (state.fet.spk.autoAttack) 100 else 0
         )
-        effect.setParameter(ViperParams.PARAM_SPK_FET_COMPRESSOR_ATTACK, state.fet.spk.attack)
+        effect.setParameter(
+            ViperParams.PARAM_SPK_FET_COMPRESSOR_ATTACK,
+            fetAttackMsToRaw(state.fet.spk.attack)
+        )
         effect.setParameter(
             ViperParams.PARAM_SPK_FET_COMPRESSOR_MAX_ATTACK,
-            state.fet.spk.maxAttack
+            fetAttackMsToRaw(state.fet.spk.maxAttack)
         )
         effect.setParameter(
             ViperParams.PARAM_SPK_FET_COMPRESSOR_AUTO_RELEASE,
             if (state.fet.spk.autoRelease) 100 else 0
         )
-        effect.setParameter(ViperParams.PARAM_SPK_FET_COMPRESSOR_RELEASE, state.fet.spk.release)
+        effect.setParameter(
+            ViperParams.PARAM_SPK_FET_COMPRESSOR_RELEASE,
+            fetReleaseMsToRaw(state.fet.spk.release)
+        )
         effect.setParameter(
             ViperParams.PARAM_SPK_FET_COMPRESSOR_MAX_RELEASE,
-            state.fet.spk.maxRelease
+            fetReleaseMsToRaw(state.fet.spk.maxRelease)
         )
-        effect.setParameter(ViperParams.PARAM_SPK_FET_COMPRESSOR_CREST, state.fet.spk.crest)
+        effect.setParameter(
+            ViperParams.PARAM_SPK_FET_COMPRESSOR_CREST,
+            fetReleaseMsToRaw(state.fet.spk.crest)
+        )
         effect.setParameter(ViperParams.PARAM_SPK_FET_COMPRESSOR_ADAPT, state.fet.spk.adapt)
         effect.setParameter(
             ViperParams.PARAM_SPK_FET_COMPRESSOR_NO_CLIP,
@@ -662,7 +736,7 @@ object EffectDispatcher {
             VSE_BARK_VALUES.getOrElse(state.vse.spk.strength) { 7600 })
         effect.setParameter(
             ViperParams.PARAM_SPK_SPECTRUM_EXTENSION_BARK_RECONSTRUCT,
-            (state.vse.spk.exciter * 5.6).toInt()
+            vseExciterToRaw(state.vse.spk.exciter)
         )
 
         effect.setParameter(
@@ -678,11 +752,11 @@ object EffectDispatcher {
             FIELD_SURROUND_WIDENING_VALUES.getOrElse(state.fieldSurround.spk.widening) { 0 })
         effect.setParameter(
             ViperParams.PARAM_SPK_FIELD_SURROUND_MID_IMAGE,
-            state.fieldSurround.spk.midImage * 10 + 100
+            fieldSurroundMidImageToRaw(state.fieldSurround.spk.midImage)
         )
         effect.setParameter(
             ViperParams.PARAM_SPK_FIELD_SURROUND_DEPTH,
-            state.fieldSurround.spk.depth * 75 + 200
+            fieldSurroundDepthToRaw(state.fieldSurround.spk.depth)
         )
 
         effect.setParameter(
@@ -744,8 +818,11 @@ object EffectDispatcher {
         effect.setParameter(ViperParams.PARAM_SPK_BASS_ENABLE, if (state.bass.spk.enabled) 1 else 0)
         FileLogger.d("Dispatch", "Bass: ${if (state.bass.spk.enabled) "ON" else "OFF"}")
         effect.setParameter(ViperParams.PARAM_SPK_BASS_MODE, state.bass.spk.mode)
-        effect.setParameter(ViperParams.PARAM_SPK_BASS_FREQUENCY, state.bass.spk.frequency + 15)
-        effect.setParameter(ViperParams.PARAM_SPK_BASS_GAIN, state.bass.spk.gain * 50 + 50)
+        effect.setParameter(
+            ViperParams.PARAM_SPK_BASS_FREQUENCY,
+            bassFrequencyToRaw(state.bass.spk.frequency)
+        )
+        effect.setParameter(ViperParams.PARAM_SPK_BASS_GAIN, bassGainToRaw(state.bass.spk.gain))
         effect.setParameter(
             ViperParams.PARAM_SPK_BASS_ANTI_POP,
             if (state.bass.spk.antiPop) 1 else 0
@@ -759,9 +836,12 @@ object EffectDispatcher {
         effect.setParameter(ViperParams.PARAM_SPK_BASS_MONO_MODE, state.bassMono.spk.mode)
         effect.setParameter(
             ViperParams.PARAM_SPK_BASS_MONO_FREQUENCY,
-            state.bassMono.spk.frequency + 15
+            bassFrequencyToRaw(state.bassMono.spk.frequency)
         )
-        effect.setParameter(ViperParams.PARAM_SPK_BASS_MONO_GAIN, state.bassMono.spk.gain * 50 + 50)
+        effect.setParameter(
+            ViperParams.PARAM_SPK_BASS_MONO_GAIN,
+            bassGainToRaw(state.bassMono.spk.gain)
+        )
         effect.setParameter(
             ViperParams.PARAM_SPK_BASS_MONO_ANTI_POP,
             if (state.bassMono.spk.antiPop) 1 else 0
@@ -773,7 +853,10 @@ object EffectDispatcher {
         )
         FileLogger.d("Dispatch", "Clarity: ${if (state.clarity.spk.enabled) "ON" else "OFF"}")
         effect.setParameter(ViperParams.PARAM_SPK_CLARITY_MODE, state.clarity.spk.mode)
-        effect.setParameter(ViperParams.PARAM_SPK_CLARITY_GAIN, state.clarity.spk.gain * 50)
+        effect.setParameter(
+            ViperParams.PARAM_SPK_CLARITY_GAIN,
+            clarityGainToRaw(state.clarity.spk.gain)
+        )
 
         effect.setParameter(ViperParams.PARAM_SPK_CURE_ENABLE, if (state.cure.spk.enabled) 1 else 0)
         FileLogger.d("Dispatch", "Cure: ${if (state.cure.spk.enabled) "ON" else "OFF"}")
@@ -811,7 +894,7 @@ object EffectDispatcher {
             "Dispatch",
             "DynamicSystem: ${if (enabled) "ON" else "OFF"} device=$deviceIndex strength=$strength"
         )
-        effect.setParameter(paramStrength, strength * 20 + 100)
+        effect.setParameter(paramStrength, dynamicSystemStrengthToRaw(strength))
         val dsCoeffs = DYNAMIC_SYSTEM_DEVICES.getOrElse(deviceIndex) { "100;5600;40;80;50;50" }
         val dsParts = dsCoeffs.split(";").map { it.toIntOrNull() ?: 0 }
         if (dsParts.size >= 6) {
