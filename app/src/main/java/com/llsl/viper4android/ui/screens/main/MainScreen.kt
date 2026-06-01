@@ -149,14 +149,16 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
 
     val importSuccessStr = stringResource(R.string.import_success)
     val importFailedStr = stringResource(R.string.import_failed)
+    val importPresetStr = stringResource(R.string.settings_import_preset)
     val importPresetLauncher =
         rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.OpenDocument(),
-        ) { uri ->
-            if (uri != null) {
-                val success = viewModel.importPresetFile(uri)
-                val msg = if (success) importSuccessStr else importFailedStr
-                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            contract = ActivityResultContracts.OpenMultipleDocuments(),
+        ) { uris ->
+            if (uris.isNotEmpty()) {
+                viewModel.importPresetFiles(uris, notificationTitle = importPresetStr, successStr = importSuccessStr) { success ->
+                    val msg = if (success) importSuccessStr else importFailedStr
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                }
             }
         }
 
