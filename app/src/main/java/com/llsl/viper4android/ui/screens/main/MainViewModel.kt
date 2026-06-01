@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -4327,50 +4328,70 @@ class MainViewModel
             }
         }
 
-        fun importPresetFile(uri: Uri): Boolean {
-            return try {
+        fun importPresetFiles(
+            uris: List<Uri>,
+            notificationTitle: String,
+            successStr: String,
+            onResult: (Boolean) -> Unit,
+        ) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val total = uris.size
+                val showProgress = total > 50
                 val destDir = getFilesDir("Preset")
-                val destFile = copyUriToFile(uri, destDir, "preset.json") ?: return false
-                // Accept both the legacy ViPER4Android xml presets and the app's
-                // own json presets - translate xml into json up front.
-                val raw = destFile.readText()
-                val isSpk: Boolean
-                val json: String
-                if (ViperXmlPreset.isViperXml(raw)) {
-                    isSpk = ViperXmlPreset.isSpeaker(raw, destFile.name)
-                    json = ViperXmlPreset.toJson(raw, isSpk).toString()
-                } else {
-                    json = raw
-                    val obj = JSONObject(json)
-                    isSpk = obj.has("spkMasterEnabled") && !obj.has("masterEnabled")
-                }
-                val fxType = if (isSpk) ViperParams.FX_TYPE_SPEAKER else ViperParams.FX_TYPE_HEADPHONE
-                deserializeAndApplyStateForMode(json, fxType)
-                viewModelScope.launch { persistStateForMode(fxType) }
-                if (fxType == activeDeviceType) {
-                    applyFullState()
-                }
-                val presetName = destFile.nameWithoutExtension
-                viewModelScope.launch {
-                    val existing = repository.getPresetByNameAndFxType(presetName, fxType)
-                    if (existing != null) {
-                        repository.updatePreset(
-                            existing.copy(settingsJson = json, updatedAt = System.currentTimeMillis()),
-                        )
-                    } else {
-                        repository.savePreset(
-                            Preset(
-                                name = presetName,
-                                fxType = fxType,
-                                settingsJson = json,
-                            ),
-                        )
+                var count = 0
+                var singleApply: Pair<String, Int>? = null
+                for ((index, uri) in uris.withIndex()) {
+                    try {
+                        val destFile = copyUriToFile(uri, destDir, "preset.json")
+                        if (destFile != null) {
+                            // Accept both the legacy ViPER4Android xml presets and the
+                            // app's own json presets - translate xml into json up front.
+                            val raw = destFile.readText()
+                            val isSpk: Boolean
+                            val json: String
+                            if (ViperXmlPreset.isViperXml(raw)) {
+                                isSpk = ViperXmlPreset.isSpeaker(raw, destFile.name)
+                                json = ViperXmlPreset.toJson(raw, isSpk).toString()
+                            } else {
+                                json = raw
+                                val obj = JSONObject(json)
+                                isSpk = obj.has("spkMasterEnabled") && !obj.has("masterEnabled")
+                            }
+                            val fxType = if (isSpk) ViperParams.FX_TYPE_SPEAKER else ViperParams.FX_TYPE_HEADPHONE
+                            val presetName = destFile.nameWithoutExtension
+                            val existing = repository.getPresetByNameAndFxType(presetName, fxType)
+                            if (existing != null) {
+                                repository.updatePreset(
+                                    existing.copy(settingsJson = json, updatedAt = System.currentTimeMillis()),
+                                )
+                            } else {
+                                repository.savePreset(
+                                    Preset(
+                                        name = presetName,
+                                        fxType = fxType,
+                                        settingsJson = json,
+                                    ),
+                                )
+                            }
+                            if (total == 1) singleApply = json to fxType
+                            count++
+                        }
+                    } catch (e: Exception) {
+                        FileLogger.e("ViewModel", "Failed to import preset from $uri", e)
+                    }
+                    if (showProgress && ((index + 1) % 10 == 0 || index + 1 == total)) {
+                        updateImportProgress(notificationTitle, index + 1, total)
                     }
                 }
-                true
-            } catch (e: Exception) {
-                FileLogger.e("ViewModel", "Failed to import preset", e)
-                false
+                singleApply?.let { (json, fxType) ->
+                    withContext(Dispatchers.Main) {
+                        deserializeAndApplyStateForMode(json, fxType)
+                        if (fxType == activeDeviceType) applyFullState()
+                    }
+                    persistStateForMode(fxType)
+                }
+                if (showProgress) completeImportProgress(notificationTitle, "$successStr: $count / $total")
+                launch(Dispatchers.Main) { onResult(count > 0) }
             }
         }
 
