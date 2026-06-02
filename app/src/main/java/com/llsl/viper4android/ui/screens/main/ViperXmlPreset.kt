@@ -72,9 +72,14 @@ object ViperXmlPreset {
         // mode integers stored as <string>
         for ((id, key) in MODE_MAP) xv[id]?.trim()?.toIntOrNull()?.let { setI(key, it) }
 
-        // bass and clarity gain use a x50 scale in the app
-        int("65577")?.let { setI("bassGain", it * 50 + 50) }
-        int("65580")?.let { setI("clarityGain", it * 50) }
+        // bass/clarity gain and vse strength changed value range in v1.5.0.
+        // Map the legacy step index onto the new scale (release-note tables):
+        //   bass/mono gain : step 0..19 -> 0.5x..10.0x   (stored 50..1000)
+        //   clarity gain   : step 0..9  -> 0.0x..4.5x    (stored 0..450)
+        //   vse strength   : step 0..10 -> 2200..8200 Hz (2200 + step*600)
+        int("65577")?.let { setI("bassGain", (it * 50 + 50).coerceIn(50, 1000)) }
+        int("65580")?.let { setI("clarityGain", (it * 50).coerceIn(0, 450)) }
+        int("65549;65550")?.let { setI("vseStrength", (2200 + it * 600).coerceIn(2200, 8200)) }
 
         // dynamic system "device" packs six numbers:
         // xLow;xHigh;yLow;yHigh;sideLow;sideHigh
@@ -94,8 +99,11 @@ object ViperXmlPreset {
         // the equalizer is always a 10 band curve here
         setI("eqBandCount", 10)
 
-        // turn the master switch and gain control on so the preset does
-        // something when it is applied
+        // Master limiter (output gain / pan / threshold limit) and playback
+        // gain control (strength / max gain / output threshold) VALUES are
+        // intentionally left at the app defaults - they are not in the maps
+        // above. We only turn the master switch and gain control on, so the
+        // preset does something when it is applied.
         setB("masterEnabled", true)
         setB("agcEnabled", true)
 
