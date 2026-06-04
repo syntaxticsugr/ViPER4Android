@@ -15,6 +15,9 @@ import com.llsl.viper4android.data.dao.PresetDao
 import com.llsl.viper4android.data.db.ViperDatabase
 import com.llsl.viper4android.data.model.DsPreset
 import com.llsl.viper4android.data.model.EqPreset
+import com.llsl.viper4android.domain.audio.AudioParameterGateway
+import com.llsl.viper4android.domain.audio.ViperServiceGateway
+import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -137,4 +140,19 @@ object AppModule {
     fun provideDataStore(
         @ApplicationContext context: Context,
     ): DataStore<Preferences> = context.dataStore
+}
+
+/**
+ * Binds the domain-layer interface implementations.
+ *
+ * Most domain singletons (such as the audio file manager and preset import manager) are
+ * constructor-injected, so Hilt can build them without help. Only [AudioParameterGateway]
+ * is an interface, so it needs an explicit binding to its [ViperServiceGateway] backing.
+ */
+@Module
+@InstallIn(SingletonComponent::class)
+abstract class DomainModule {
+    @Binds
+    @Singleton
+    abstract fun bindAudioParameterGateway(impl: ViperServiceGateway): AudioParameterGateway
 }
