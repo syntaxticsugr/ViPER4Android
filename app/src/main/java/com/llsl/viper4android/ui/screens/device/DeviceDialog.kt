@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -25,11 +26,13 @@ import androidx.compose.material.icons.filled.SettingsBackupRestore
 import androidx.compose.material.icons.filled.Speaker
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.BasicAlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -46,10 +49,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.llsl.viper4android.R
 import com.llsl.viper4android.data.model.DeviceSettings
+import com.llsl.viper4android.ui.theme.Dimens
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeviceDialog(
     devices: List<DeviceSettings>,
@@ -69,6 +74,7 @@ fun DeviceDialog(
     if (renamingDeviceId != null) {
         AlertDialog(
             onDismissRequest = { renamingDeviceId = null },
+            shape = MaterialTheme.shapes.extraLarge,
             title = { Text(stringResource(R.string.device_rename_title)) },
             text = {
                 OutlinedTextField(
@@ -101,66 +107,95 @@ fun DeviceDialog(
         return
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            if (selectedDevice != null) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    IconButton(onClick = { selectedDeviceId = null }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
-                    }
-                    Text(
-                        text = selectedDevice.deviceName,
-                        style = MaterialTheme.typography.headlineSmall,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    IconButton(onClick = {
-                        renameInput = selectedDevice.deviceName
-                        renamingDeviceId = selectedDevice.deviceId
-                    }) {
-                        Icon(
-                            Icons.Default.Edit,
-                            contentDescription = stringResource(R.string.action_rename),
+    BasicAlertDialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+        ) {
+            Column(
+                modifier = Modifier.padding(vertical = Dimens.dialogPadding),
+            ) {
+                // Header: a back arrow plus rename when a device is selected, otherwise the list title.
+                if (selectedDevice != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(start = Dimens.space, end = Dimens.space, bottom = Dimens.spaceMd),
+                    ) {
+                        IconButton(onClick = { selectedDeviceId = null }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                        }
+                        Text(
+                            text = selectedDevice.deviceName,
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
+                        IconButton(onClick = {
+                            renameInput = selectedDevice.deviceName
+                            renamingDeviceId = selectedDevice.deviceId
+                        }) {
+                            Icon(
+                                Icons.Default.Edit,
+                                contentDescription = stringResource(R.string.action_rename),
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        text = stringResource(R.string.device_dialog_title),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier =
+                            Modifier.padding(
+                                start = Dimens.dialogPadding,
+                                end = Dimens.dialogPadding,
+                                bottom = Dimens.spaceMd,
+                            ),
+                    )
+                }
+
+                // Detail view for the chosen device, or the full list when nothing is selected.
+                if (selectedDevice != null) {
+                    DeviceDetailView(
+                        device = selectedDevice,
+                        isActive = selectedDevice.deviceId == activeDeviceId,
+                        onLoad = { onLoad(selectedDevice.deviceId) },
+                        onSave = { onSave(selectedDevice.deviceId) },
+                        onDelete = {
+                            onDelete(selectedDevice.deviceId)
+                            selectedDeviceId = null
+                        },
+                    )
+                } else {
+                    DeviceListView(
+                        devices = devices,
+                        activeDeviceId = activeDeviceId,
+                        onSelect = { selectedDeviceId = it.deviceId },
+                    )
+                }
+
+                // Close button, shown only on the list view; the detail view has its own actions.
+                if (selectedDevice == null) {
+                    Row(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(top = Dimens.spaceMd, end = Dimens.space),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = onDismiss) {
+                            Text(stringResource(R.string.action_close))
+                        }
                     }
                 }
-            } else {
-                Text(stringResource(R.string.device_dialog_title))
             }
-        },
-        text = {
-            if (selectedDevice != null) {
-                DeviceDetailView(
-                    device = selectedDevice,
-                    isActive = selectedDevice.deviceId == activeDeviceId,
-                    onLoad = { onLoad(selectedDevice.deviceId) },
-                    onSave = { onSave(selectedDevice.deviceId) },
-                    onDelete = {
-                        onDelete(selectedDevice.deviceId)
-                        selectedDeviceId = null
-                    },
-                )
-            } else {
-                DeviceListView(
-                    devices = devices,
-                    activeDeviceId = activeDeviceId,
-                    onSelect = { selectedDeviceId = it.deviceId },
-                )
-            }
-        },
-        confirmButton = {
-            if (selectedDevice == null) {
-                TextButton(onClick = onDismiss) {
-                    Text(stringResource(R.string.action_close))
-                }
-            }
-        },
-    )
+        }
+    }
 }
 
 @Composable
@@ -174,7 +209,7 @@ private fun DeviceListView(
             modifier =
                 Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 24.dp),
+                    .padding(vertical = Dimens.spaceXl),
             contentAlignment = Alignment.Center,
         ) {
             Text(
@@ -194,58 +229,72 @@ private fun DeviceListView(
             )
         }
 
-    LazyColumn {
+    LazyColumn(
+        modifier = Modifier.heightIn(max = 360.dp),
+        contentPadding =
+            androidx.compose.foundation.layout
+                .PaddingValues(horizontal = Dimens.dialogPadding),
+        verticalArrangement = Arrangement.spacedBy(Dimens.spaceSm),
+    ) {
         items(sorted, key = { it.deviceId }) { device ->
             val isActive = device.deviceId == activeDeviceId
-            Row(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { onSelect(device) }
-                        .padding(vertical = 8.dp, horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            Surface(
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                Icon(
-                    imageVector = deviceIcon(device),
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (isActive) {
-                            Canvas(modifier = Modifier.size(8.dp)) {
-                                drawCircle(Color(0xFF4CAF50))
+                Row(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(device) }
+                            .padding(horizontal = Dimens.space, vertical = Dimens.spaceMd),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = deviceIcon(device),
+                        contentDescription = null,
+                        modifier = Modifier.size(Dimens.rowIconSize),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(modifier = Modifier.width(Dimens.rowIconGap))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (isActive) {
+                                Canvas(modifier = Modifier.size(8.dp)) {
+                                    drawCircle(Color(0xFF4CAF50))
+                                }
+                                Spacer(modifier = Modifier.width(Dimens.spaceXs))
                             }
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = device.deviceName,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
-                        Text(
-                            text = device.deviceName,
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        if (!isActive) {
+                            Text(
+                                text =
+                                    DateUtils
+                                        .getRelativeTimeSpanString(
+                                            device.lastConnected,
+                                            System.currentTimeMillis(),
+                                            DateUtils.MINUTE_IN_MILLIS,
+                                        ).toString(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
-                    if (!isActive) {
-                        Text(
-                            text =
-                                DateUtils
-                                    .getRelativeTimeSpanString(
-                                        device.lastConnected,
-                                        System.currentTimeMillis(),
-                                        DateUtils.MINUTE_IN_MILLIS,
-                                    ).toString(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                IconButton(onClick = { onSelect(device) }) {
-                    Icon(Icons.Default.ChevronRight, contentDescription = null)
+                    Icon(
+                        Icons.Default.ChevronRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
-            HorizontalDivider()
         }
     }
 }
@@ -262,17 +311,15 @@ private fun DeviceDetailView(
 ) {
     val isBuiltIn = device.deviceId in BUILTIN_DEVICE_IDS
     val canDelete = !isActive && !isBuiltIn
-    Column {
+    Column(modifier = Modifier.padding(horizontal = Dimens.dialogPadding)) {
         StatusRow(
             label = stringResource(R.string.device_label_type),
             value = deviceTypeName(device),
         )
-        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
         StatusRow(
             label = stringResource(R.string.device_label_address),
             value = if (device.deviceId == "speaker" || device.deviceId == "wired_headphone") "-" else device.deviceId,
         )
-        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
         StatusRow(
             label = stringResource(R.string.label_mode),
             value =
@@ -282,7 +329,6 @@ private fun DeviceDetailView(
                     stringResource(R.string.device_mode_speaker)
                 },
         )
-        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
         StatusRow(
             label = stringResource(R.string.device_label_last_conn),
             value =
@@ -293,7 +339,7 @@ private fun DeviceDetailView(
                         .format(Date(device.lastConnected))
                 },
         )
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(Dimens.space))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly,
@@ -333,8 +379,9 @@ private fun StatusRow(
         modifier =
             Modifier
                 .fillMaxWidth()
-                .padding(vertical = 4.dp),
+                .padding(vertical = Dimens.spaceSm),
         horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = label,
@@ -344,6 +391,7 @@ private fun StatusRow(
         Text(
             text = value,
             style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
         )
     }
 }
@@ -361,10 +409,10 @@ private fun ActionItem(
         modifier =
             Modifier
                 .clickable(enabled = enabled) { onClick() }
-                .padding(8.dp),
+                .padding(Dimens.spaceSm),
     ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp), tint = tint)
-        Spacer(modifier = Modifier.height(4.dp))
+        Icon(icon, contentDescription = null, modifier = Modifier.size(Dimens.rowIconSize), tint = tint)
+        Spacer(modifier = Modifier.height(Dimens.spaceXs))
         Text(label, style = MaterialTheme.typography.labelSmall, color = tint)
     }
 }
