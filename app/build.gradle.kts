@@ -101,4 +101,7 @@ dependencies {
     implementation(libs.datastore.preferences)
 
     implementation(libs.coroutines.android)
+
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
 }

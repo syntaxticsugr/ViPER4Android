@@ -2,11 +2,15 @@ package com.llsl.viper4android.ui.screens.main
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,6 +25,7 @@ import androidx.compose.material.icons.filled.CandlestickChart
 import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.CrisisAlert
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headphones
@@ -41,9 +46,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryScrollableTabRow
-import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.Tab
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -62,10 +65,12 @@ import com.llsl.viper4android.audio.ViperParams
 import com.llsl.viper4android.ui.components.EffectSection
 import com.llsl.viper4android.ui.components.EqCurveGraph
 import com.llsl.viper4android.ui.components.EqEditDialog
-import com.llsl.viper4android.ui.components.LabeledDropdown
+import com.llsl.viper4android.ui.components.LabeledChipRow
+import com.llsl.viper4android.ui.components.LabeledFilePicker
 import com.llsl.viper4android.ui.components.LabeledSlider
 import com.llsl.viper4android.ui.components.LabeledSwitch
 import com.llsl.viper4android.ui.components.resolvePresetName
+import com.llsl.viper4android.ui.theme.Dimens
 import java.util.Locale
 import kotlin.math.log10
 import kotlin.math.roundToInt
@@ -91,10 +96,10 @@ fun MasterLimiterSection(
 
     EffectSection(
         title = stringResource(R.string.section_output),
+        descriptionRes = R.string.description_36868,
         enabled = masterEnabled,
         onEnabledChange = onMasterEnabledChange,
         icon = Icons.AutoMirrored.Filled.VolumeUp,
-        initiallyExpanded = true,
     ) {
         val gainDb = if (outputVolume > 0) 20.0 * log10(outputVolume / 100.0) else -99.9
         LabeledSlider(
@@ -146,6 +151,7 @@ fun PlaybackGainSection(
 
     EffectSection(
         title = stringResource(R.string.section_agc),
+        descriptionRes = R.string.description_65565,
         enabled = enabled,
         onEnabledChange = onEnabledChange,
         icon = Icons.AutoMirrored.Filled.TrendingUp,
@@ -277,6 +283,7 @@ fun FetCompressorSection(
 
     EffectSection(
         title = stringResource(R.string.section_fet_compressor),
+        descriptionRes = R.string.description_65610,
         enabled = enabled,
         onEnabledChange = onEnabledChange,
         icon = Icons.Default.VerticalAlignCenter,
@@ -479,13 +486,41 @@ fun MultibandCompressorSection(
         onEnabledChange = onEnabledChange,
         icon = Icons.Default.Compress,
     ) {
-        PrimaryTabRow(selectedTabIndex = selectedTab) {
+        // Rounded segmented selector: one equal-width pill per band, the active one filled.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
             tabNames.forEachIndexed { index, title ->
-                Tab(
-                    selected = selectedTab == index,
+                val isSelected = selectedTab == index
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    shape = MaterialTheme.shapes.large,
+                    color =
+                        if (isSelected) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHigh
+                        },
+                    contentColor =
+                        if (isSelected) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                     onClick = { selectedTab = index },
-                    text = { Text(title) },
-                )
+                ) {
+                    Box(
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1,
+                        )
+                    }
+                }
             }
         }
 
@@ -659,14 +694,16 @@ fun DdcSection(
 
     EffectSection(
         title = stringResource(R.string.section_ddc),
+        descriptionRes = R.string.description_65546,
         enabled = enabled,
         onEnabledChange = onEnabledChange,
         icon = Icons.Default.SettingsInputComponent,
     ) {
-        LabeledDropdown(
+        LabeledFilePicker(
             label = stringResource(R.string.label_ddc_device),
             selectedValue = device.ifEmpty { vdcNoneLabel },
             options = cdvOptions,
+            icon = Icons.Default.Headphones,
             onOptionSelected = { index, value ->
                 onDeviceChange(if (index == 0) "" else value)
             },
@@ -693,6 +730,7 @@ fun SpectrumExtensionSection(
 
     EffectSection(
         title = stringResource(R.string.section_spectrum_extension),
+        descriptionRes = R.string.description_65548,
         enabled = enabled,
         onEnabledChange = onEnabledChange,
         icon = Icons.Default.Waves,
@@ -744,6 +782,7 @@ fun EqualizerSection(
 
     EffectSection(
         title = stringResource(R.string.section_equalizer),
+        descriptionRes = R.string.description_65551,
         enabled = enabled,
         onEnabledChange = onEnabledChange,
         icon = Icons.Default.Equalizer,
@@ -759,11 +798,11 @@ fun EqualizerSection(
                 31 -> 3
                 else -> 0
             }
-        LabeledDropdown(
+        LabeledChipRow(
             label = stringResource(R.string.label_eq_bands),
-            selectedValue = bandCountOptions[bandCountIndex],
             options = bandCountOptions,
-            onOptionSelected = { index, _ -> onBandCountChange(bandCounts[index]) },
+            selectedIndex = bandCountIndex,
+            onSelect = { index -> onBandCountChange(bandCounts[index]) },
         )
 
         if (bands.size >= bandCount) {
@@ -853,46 +892,73 @@ fun DynamicEqSection(
         onEnabledChange = onEnabledChange,
         icon = Icons.Default.Insights,
     ) {
-        PrimaryScrollableTabRow(
-            selectedTabIndex = safeTab,
-            edgePadding = 0.dp,
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(vertical = Dimens.spaceSm),
+            horizontalArrangement = Arrangement.spacedBy(Dimens.spaceSm),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             for (i in 0 until bandCount) {
                 val isSelected = safeTab == i
-                val color =
-                    if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier =
-                        Modifier
-                            .combinedClickable(
-                                onClick = { selectedTab = i },
-                                onLongClick = { if (bandCount > 1) deleteBandIndex = i },
-                            ).padding(horizontal = 16.dp, vertical = 12.dp),
+                Surface(
+                    shape = MaterialTheme.shapes.large,
+                    color =
+                        if (isSelected) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHigh
+                        },
+                    contentColor =
+                        if (isSelected) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                 ) {
-                    Text(
-                        text = formatFreq(freqs.getOrElse(i) { 1000 }),
-                        color = color,
-                        style = MaterialTheme.typography.labelLarge,
-                    )
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier =
+                            Modifier
+                                .height(Dimens.chipHeight)
+                                .combinedClickable(
+                                    onClick = { selectedTab = i },
+                                    onLongClick = { if (bandCount > 1) deleteBandIndex = i },
+                                ).padding(horizontal = Dimens.space),
+                    ) {
+                        Text(
+                            text = formatFreq(freqs.getOrElse(i) { 1000 }),
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
                 }
             }
             val lastFreq = if (bandCount > 0) freqs.getOrElse(bandCount - 1) { 0 } else 0
             if (bandCount < 8 && lastFreq < 20000) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier =
-                        Modifier
-                            .clickable {
-                                viewModel.addDynamicEqBand()
-                                selectedTab = bandCount
-                            }.padding(horizontal = 16.dp, vertical = 12.dp),
+                Surface(
+                    shape = MaterialTheme.shapes.large,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    onClick = {
+                        viewModel.addDynamicEqBand()
+                        selectedTab = bandCount
+                    },
                 ) {
-                    Icon(
-                        Icons.Default.Add,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier =
+                            Modifier
+                                .height(Dimens.chipHeight)
+                                .padding(horizontal = Dimens.space),
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                 }
             }
         }
@@ -970,11 +1036,11 @@ fun DynamicEqSection(
                     stringResource(R.string.filter_low_shelf),
                     stringResource(R.string.filter_high_shelf),
                 )
-            LabeledDropdown(
+            LabeledChipRow(
                 label = stringResource(R.string.label_dynamic_eq_filter_type),
-                selectedValue = filterTypeNames[filterType],
                 options = filterTypeNames,
-                onOptionSelected = { index, _ -> onFilterTypeChange(index) },
+                selectedIndex = filterType,
+                onSelect = onFilterTypeChange,
             )
         }
     }
@@ -1002,14 +1068,16 @@ fun ConvolverSection(
 
     EffectSection(
         title = stringResource(R.string.section_convolver),
+        descriptionRes = R.string.description_65538,
         enabled = enabled,
         onEnabledChange = onEnabledChange,
         icon = Icons.Default.BlurCircular,
     ) {
-        LabeledDropdown(
+        LabeledFilePicker(
             label = stringResource(R.string.label_convolver_kernel),
             selectedValue = kernel.ifEmpty { kernelNoneLabel },
             options = kernelOptions,
+            icon = Icons.Default.BlurCircular,
             onOptionSelected = { index, value ->
                 onKernelChange(if (index == 0) "" else value)
             },
@@ -1044,6 +1112,7 @@ fun FieldSurroundSection(
 
     EffectSection(
         title = stringResource(R.string.section_field_surround),
+        descriptionRes = R.string.description_65553,
         enabled = enabled,
         onEnabledChange = onEnabledChange,
         icon = Icons.Default.SurroundSound,
@@ -1095,6 +1164,7 @@ fun DiffSurroundSection(
 
     EffectSection(
         title = stringResource(R.string.section_diff_surround),
+        descriptionRes = R.string.description_65557,
         enabled = enabled,
         onEnabledChange = onEnabledChange,
         icon = Icons.Default.SpatialAudio,
@@ -1214,6 +1284,7 @@ fun HeadphoneSurroundSection(
 
     EffectSection(
         title = stringResource(R.string.section_headphone_surround),
+        descriptionRes = R.string.description_65544,
         enabled = enabled,
         onEnabledChange = onEnabledChange,
         icon = Icons.Default.Headphones,
@@ -1252,6 +1323,7 @@ fun ReverberationSection(
 
     EffectSection(
         title = stringResource(R.string.section_reverb),
+        descriptionRes = R.string.description_65559,
         enabled = enabled,
         onEnabledChange = onEnabledChange,
         icon = Icons.Default.BlurOn,
@@ -1331,6 +1403,7 @@ fun DynamicSystemSection(
 
     EffectSection(
         title = stringResource(R.string.section_dynamic_system),
+        descriptionRes = R.string.description_65569,
         enabled = enabled,
         onEnabledChange = onEnabledChange,
         icon = Icons.Default.CandlestickChart,
@@ -1338,41 +1411,49 @@ fun DynamicSystemSection(
         val presetName =
             dsPresets.find { it.id == dsPresetId }?.let { resolvePresetName(it) }
                 ?: stringResource(R.string.label_custom)
-        LabeledDropdown(
+        LabeledFilePicker(
             label = stringResource(R.string.label_preset),
             selectedValue = presetName,
             options = dsPresets.map { resolvePresetName(it) },
+            icon = Icons.Default.CandlestickChart,
             onOptionSelected = { index, _ -> onPresetSelect(dsPresets[index].id) },
         )
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(Dimens.spaceSm),
         ) {
-            TextButton(onClick = { showSaveDialog = true }) {
+            TextButton(
+                onClick = { showSaveDialog = true },
+                modifier = Modifier.weight(1f),
+            ) {
                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(Dimens.spaceXs))
                 Text(stringResource(R.string.action_save))
             }
             TextButton(
                 onClick = { dsPresetId?.let { onPresetDelete(it) } },
                 enabled = dsPresetId != null,
+                modifier = Modifier.weight(1f),
             ) {
                 Icon(
                     Icons.Default.Delete,
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
                 )
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(Dimens.spaceXs))
                 Text(stringResource(R.string.action_delete))
             }
-            TextButton(onClick = onReset) {
+            TextButton(
+                onClick = onReset,
+                modifier = Modifier.weight(1f),
+            ) {
                 Icon(
                     Icons.Default.RestartAlt,
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
                 )
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(Dimens.spaceXs))
                 Text(stringResource(R.string.action_reset))
             }
         }
@@ -1441,6 +1522,8 @@ fun DynamicSystemSection(
     if (showSaveDialog) {
         AlertDialog(
             onDismissRequest = { showSaveDialog = false },
+            shape = MaterialTheme.shapes.extraLarge,
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
             title = { Text(stringResource(R.string.preset_save_title)) },
             text = {
                 OutlinedTextField(
@@ -1448,6 +1531,21 @@ fun DynamicSystemSection(
                     onValueChange = { presetNameInput = it },
                     label = { Text(stringResource(R.string.preset_name_hint)) },
                     singleLine = true,
+                    isError = presetNameInput.isBlank(),
+                    trailingIcon = {
+                        if (presetNameInput.isBlank()) {
+                            Icon(
+                                imageVector = Icons.Filled.Error,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    },
+                    supportingText = {
+                        if (presetNameInput.isBlank()) {
+                            Text(stringResource(R.string.preset_name_required))
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
             },
@@ -1460,13 +1558,14 @@ fun DynamicSystemSection(
                             showSaveDialog = false
                         }
                     },
+                    enabled = presetNameInput.isNotBlank(),
                 ) {
-                    Text(stringResource(android.R.string.ok))
+                    Text(stringResource(R.string.action_save))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showSaveDialog = false }) {
-                    Text(stringResource(android.R.string.cancel))
+                    Text(stringResource(R.string.action_cancel))
                 }
             },
         )
@@ -1487,6 +1586,7 @@ fun TubeSimulatorSection(
 
     EffectSection(
         title = stringResource(R.string.section_tube_simulator),
+        descriptionRes = R.string.description_65583,
         enabled = enabled,
         onEnabledChange = onEnabledChange,
         icon = Icons.Default.MusicNote,
@@ -1591,15 +1691,16 @@ fun ViperBassSection(
 
     EffectSection(
         title = stringResource(R.string.section_viper_bass),
+        descriptionRes = R.string.description_65574,
         enabled = enabled,
         onEnabledChange = onEnabledChange,
         icon = Icons.Default.GraphicEq,
     ) {
-        LabeledDropdown(
+        LabeledChipRow(
             label = stringResource(R.string.label_mode),
-            selectedValue = modeNames.getOrElse(mode) { modeNames[0] },
             options = modeNames,
-            onOptionSelected = { index, _ -> onModeChange(index) },
+            selectedIndex = mode,
+            onSelect = onModeChange,
         )
         if (mode != 2) {
             LabeledSlider(
@@ -1659,11 +1760,11 @@ fun ViperBassMonoSection(
         onEnabledChange = onEnabledChange,
         icon = Icons.Default.GraphicEq,
     ) {
-        LabeledDropdown(
+        LabeledChipRow(
             label = stringResource(R.string.label_mode),
-            selectedValue = modeNames.getOrElse(mode) { modeNames[0] },
             options = modeNames,
-            onOptionSelected = { index, _ -> onModeChange(index) },
+            selectedIndex = mode,
+            onSelect = onModeChange,
         )
         if (mode != 2) {
             LabeledSlider(
@@ -1713,17 +1814,20 @@ fun ViperClaritySection(
     val onModeChange = viewModel::setClarityMode
     val onGainChange = viewModel::setClarityGain
 
+    val safeMode = mode.coerceIn(0, modeNames.lastIndex)
+
     EffectSection(
         title = stringResource(R.string.section_viper_clarity),
+        descriptionRes = R.string.description_65578,
         enabled = enabled,
         onEnabledChange = onEnabledChange,
         icon = Icons.Default.Hearing,
     ) {
-        LabeledDropdown(
+        LabeledChipRow(
             label = stringResource(R.string.label_mode),
-            selectedValue = modeNames.getOrElse(mode) { modeNames[0] },
             options = modeNames,
-            onOptionSelected = { index, _ -> onModeChange(index) },
+            selectedIndex = safeMode,
+            onSelect = onModeChange,
         )
         LabeledSlider(
             label = stringResource(R.string.label_gain),
@@ -1758,15 +1862,16 @@ fun AuditoryProtectionSection(
 
     EffectSection(
         title = stringResource(R.string.section_cure),
+        descriptionRes = R.string.description_65581,
         enabled = enabled,
         onEnabledChange = onEnabledChange,
         icon = Icons.Default.HealthAndSafety,
     ) {
-        LabeledDropdown(
+        LabeledChipRow(
             label = stringResource(R.string.label_cure_strength),
-            selectedValue = strengthNames.getOrElse(strength) { strengthNames[0] },
             options = strengthNames,
-            onOptionSelected = { index, _ -> onStrengthChange(index) },
+            selectedIndex = strength,
+            onSelect = onStrengthChange,
         )
     }
 }
@@ -1794,15 +1899,16 @@ fun AnalogXSection(
 
     EffectSection(
         title = stringResource(R.string.section_analogx),
+        descriptionRes = R.string.description_65584,
         enabled = enabled,
         onEnabledChange = onEnabledChange,
         icon = Icons.Default.Memory,
     ) {
-        LabeledDropdown(
-            label = stringResource(R.string.label_mode),
-            selectedValue = modeNames.getOrElse(mode) { modeNames[0] },
+        LabeledChipRow(
+            label = stringResource(R.string.label_level),
             options = modeNames,
-            onOptionSelected = { index, _ -> onModeChange(index) },
+            selectedIndex = mode,
+            onSelect = onModeChange,
         )
     }
 }
@@ -1814,6 +1920,7 @@ fun SpeakerOptSection(
 ) {
     EffectSection(
         title = stringResource(R.string.section_speaker_optimization),
+        descriptionRes = R.string.description_65603,
         enabled = state.speakerCorrection.spk.enabled,
         onEnabledChange = viewModel::setSpeakerOptEnabled,
         icon = Icons.Default.SpeakerPhone,
