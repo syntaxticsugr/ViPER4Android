@@ -27,15 +27,15 @@ import com.llsl.viper4android.R
 import com.llsl.viper4android.ui.theme.Dimens
 
 /**
- * A single-choice selector that reads the same as the file pickers (DDC "Headset correction",
- * Convolver "Kernel"): a tappable row with the [label] over the current [selectedValue] and a
- * trailing chevron, opening a [OptionPickerDialog] of the available [options]. Use it for fixed
- * option lists — mode/type enums and the like — so every picker in the app shares one look rather
- * than mixing in a bordered text-field style. When [onDeleteOption] is given, long-pressing an
- * option beyond the first lets the user delete it.
+ * A picker for an imported audio file — the DDC "Headset correction" and Convolver "Kernel"
+ * selectors. It shows a tappable row with the [label] over the current [selectedValue], and opens
+ * a radio-button dialog of the available [options] (with the dialog's [icon] above its title).
+ * When [onDeleteOption] is given, long-pressing any option beyond the first lets the user delete
+ * that file. This is deliberately a different look from the mode selectors: file lists can get
+ * long, and radio circles read better there than a row of pills.
  */
 @Composable
-fun LabeledDropdown(
+fun LabeledFilePicker(
     label: String,
     selectedValue: String,
     options: List<String>,

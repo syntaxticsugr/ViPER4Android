@@ -122,7 +122,7 @@
 
     <!-- Headphone Surround -->
     <string name="section_headphone_surround">耳机环绕声+</string>
-    <string name="label_vhe_quality">质量等级</string>
+    <string name="label_vhe_quality">等级</string>
 
     <!-- Reverberation -->
     <string name="section_reverb">混响</string>
@@ -194,7 +194,7 @@
     <string name="clarity_mode_xhifi">XHiFi</string>
 
     <!-- Presets -->
-    <string name="preset_save_title">保存预设</string>
+    <string name="preset_save_title">新建预设</string>
     <string name="preset_rename_title">重命名预设</string>
     <string name="preset_name_hint">预设名称</string>
     <string name="preset_empty">没有已保存的预设</string>

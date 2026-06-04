@@ -1,15 +1,18 @@
 package com.llsl.viper4android.ui.components
 
-import android.graphics.Color.argb
 import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,12 +23,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BasicAlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -42,62 +45,66 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.llsl.viper4android.R
 import com.llsl.viper4android.audio.EffectDispatcher
 import com.llsl.viper4android.data.model.EqPreset
+import com.llsl.viper4android.ui.theme.Dimens
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.roundToInt
 
 private const val DB_MIN = -12f
 private const val DB_MAX = 12f
-private val DB_GRID_LINES = listOf(-12f, -6f, 0f, 6f, 12f)
+// Horizontal grid rules every 3 dB across the full ±12 dB range. The outermost lines sit at the
+// top and bottom edges, marking the largest boost and cut a band can reach.
+private val DB_GRID_LINES = listOf(-12f, -9f, -6f, -3f, 0f, 3f, 6f, 9f, 12f)
 
+/**
+ * The EQ preview graph: a smooth spline (drawn in the primary colour) through the band points,
+ * over a faint grid, with a soft gradient fill beneath the curve that fades to transparent and
+ * frequency labels along the bottom. Tapping invokes [onClick], which normally opens [EqEditDialog].
+ */
 @Composable
 fun EqCurveGraph(
     bands: List<Float>,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier,
     bandCount: Int = 10,
+    modifier: Modifier = Modifier,
 ) {
     val freqLabels = EffectDispatcher.eqGraphLabelsForCount(bandCount)
     val primary = MaterialTheme.colorScheme.primary
-    val surfaceDark = MaterialTheme.colorScheme.surfaceContainerHighest
+    val onSurface = MaterialTheme.colorScheme.onSurface
     val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
+    // A faint wash of onSurface for the grid, so it reads as a backdrop rather than competing
+    // with the curve.
+    val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
     val density = LocalDensity.current
 
-    val graphModifier =
-        if (modifier == Modifier) {
-            Modifier
-                .fillMaxWidth()
-                .height(180.dp)
-        } else {
-            modifier.fillMaxWidth()
-        }
-
-    Surface(
+    Box(
         modifier =
-            graphModifier
-                .clip(RoundedCornerShape(12.dp))
-                .clickable { onClick() },
-        color = surfaceDark,
-        shape = RoundedCornerShape(12.dp),
+            modifier
+                .fillMaxWidth()
+                .height(Dimens.eqGraphHeight)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { onClick() },
     ) {
-        Canvas(modifier = Modifier.fillMaxWidth()) {
-            val paddingLeft = 28.dp.toPx()
-            val paddingRight = 16.dp.toPx()
-            val paddingTop = 24.dp.toPx()
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val paddingLeft = 12.dp.toPx()
+            val paddingRight = 12.dp.toPx()
+            val paddingTop = 16.dp.toPx()
             val paddingBottom = 28.dp.toPx()
 
             val graphWidth = size.width - paddingLeft - paddingRight
@@ -105,38 +112,31 @@ fun EqCurveGraph(
 
             val gridPaint =
                 Paint().apply {
-                    color = argb(25, 255, 255, 255)
-                    strokeWidth = 1f
+                    color = gridColor.toArgb()
+                    strokeWidth = with(density) { 1.5.dp.toPx() }
                     style = Paint.Style.STROKE
+                    isAntiAlias = true
                 }
 
             val freqTextPaint =
                 Paint().apply {
-                    color = onSurfaceVariant.hashCode()
+                    color = onSurface.toArgb()
                     textSize = with(density) { (if (bandCount > 15) 7 else 9).dp.toPx() }
                     textAlign = Paint.Align.CENTER
                     isAntiAlias = true
                     typeface = Typeface.DEFAULT
                 }
 
-            val dbLabelPaint =
-                Paint().apply {
-                    color = argb(120, 255, 255, 255)
-                    textSize = with(density) { 8.dp.toPx() }
-                    textAlign = Paint.Align.RIGHT
-                    isAntiAlias = true
-                    typeface = Typeface.DEFAULT
-                }
-
             val valuePaint =
                 Paint().apply {
-                    color = primary.hashCode()
+                    color = onSurface.toArgb()
                     textSize = with(density) { 8.dp.toPx() }
                     textAlign = Paint.Align.CENTER
                     isAntiAlias = true
                     typeface = Typeface.DEFAULT_BOLD
                 }
 
+            // Draw the faint grid rules at ±3/6/9 dB. There are no axis labels by design.
             for (db in DB_GRID_LINES) {
                 val y = paddingTop + graphHeight * (1f - (db - DB_MIN) / (DB_MAX - DB_MIN))
                 drawContext.canvas.nativeCanvas.drawLine(
@@ -145,18 +145,6 @@ fun EqCurveGraph(
                     size.width - paddingRight,
                     y,
                     gridPaint,
-                )
-                val label =
-                    when {
-                        db > 0 -> "+${db.toInt()}"
-                        db == 0f -> "0"
-                        else -> "${db.toInt()}"
-                    }
-                drawContext.canvas.nativeCanvas.drawText(
-                    label,
-                    paddingLeft - 4.dp.toPx(),
-                    y + with(density) { 3.dp.toPx() },
-                    dbLabelPaint,
                 )
             }
 
@@ -191,7 +179,7 @@ fun EqCurveGraph(
                 path = fillPath,
                 brush =
                     Brush.verticalGradient(
-                        colors = listOf(primary.copy(alpha = 0.35f), Color.Transparent),
+                        colors = listOf(primary.copy(alpha = 0.45f), Color.Transparent),
                         startY = paddingTop,
                         endY = paddingTop + graphHeight,
                     ),
@@ -200,7 +188,7 @@ fun EqCurveGraph(
             drawPath(
                 path = curvePath,
                 color = primary,
-                style = Stroke(width = 2.dp.toPx()),
+                style = Stroke(width = 2.5.dp.toPx()),
             )
 
             val labelStep =
@@ -215,7 +203,7 @@ fun EqCurveGraph(
             points.forEachIndexed { i, pt ->
                 drawCircle(
                     color = primary,
-                    radius = (if (bandCount > 15) 2 else 3).dp.toPx(),
+                    radius = (if (bandCount > 15) 3 else 5).dp.toPx(),
                     center = pt,
                 )
 
@@ -282,6 +270,7 @@ private fun buildSplinePath(points: List<Offset>): Path {
     return path
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EqEditDialog(
     bands: List<Float>,
@@ -311,188 +300,176 @@ fun EqEditDialog(
     var showSaveDialog by remember { mutableStateOf(false) }
     var presetNameInput by remember { mutableStateOf("") }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = stringResource(R.string.section_equalizer),
-                style = MaterialTheme.typography.titleMedium,
-            )
-        },
-        text = {
+    BasicAlertDialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(Dimens.dialogCorner),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+        ) {
             Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
+                modifier =
+                    Modifier
+                        .padding(vertical = Dimens.dialogPadding)
+                        .verticalScroll(rememberScrollState()),
             ) {
-                EqCurveGraph(
-                    bands = localBands.toList(),
-                    onClick = {},
-                    modifier = Modifier.height(160.dp),
-                    bandCount = bandCount,
+                Icon(
+                    imageVector = Icons.Default.GraphicEq,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.secondary,
+                    modifier =
+                        Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .padding(bottom = Dimens.spaceSm),
+                )
+                Text(
+                    text = stringResource(R.string.section_equalizer),
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(start = Dimens.dialogPadding, end = Dimens.dialogPadding, bottom = Dimens.space),
                 )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Column(modifier = Modifier.padding(horizontal = Dimens.dialogPadding)) {
+                    EqCurveGraph(
+                        bands = localBands.toList(),
+                        onClick = {},
+                        bandCount = bandCount,
+                    )
 
-                val presetNames = presets.map { resolvePresetName(it) }
-                val selectedPresetName =
-                    presets.find { it.id == presetId }?.let { resolvePresetName(it) }
-                        ?: stringResource(R.string.label_custom)
+                    Spacer(modifier = Modifier.height(Dimens.space))
 
-                LabeledDropdown(
-                    label = stringResource(R.string.label_preset),
-                    selectedValue = selectedPresetName,
-                    options = presetNames,
-                    onOptionSelected = { index, _ -> onPresetSelect(presets[index].id) },
-                )
+                    // Horizontally scrolling row of preset chips (Flat, Deep, Bass booster, and so on).
+                    Row(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(Dimens.spaceSm),
+                    ) {
+                        presets.forEach { preset ->
+                            PresetChip(
+                                label = resolvePresetName(preset),
+                                selected = preset.id == presetId,
+                                onClick = { onPresetSelect(preset.id) },
+                            )
+                        }
+                    }
 
-                Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(Dimens.spaceSm))
+
+                    // Save-as, Reset, and (only for a saved preset) Delete actions.
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Dimens.spaceSm),
+                    ) {
+                        TextButton(onClick = { showSaveDialog = true }) {
+                            Icon(
+                                Icons.Default.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(modifier = Modifier.width(Dimens.spaceXs))
+                            Text(stringResource(R.string.action_save))
+                        }
+                        TextButton(onClick = {
+                            for (i in localBands.indices) {
+                                localBands[i] = 0f
+                            }
+                            onReset()
+                        }) {
+                            Icon(
+                                Icons.Default.RestartAlt,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(modifier = Modifier.width(Dimens.spaceXs))
+                            Text(stringResource(R.string.action_reset))
+                        }
+                        if (presetId != null) {
+                            TextButton(onClick = { onPresetDelete(presetId) }) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Spacer(modifier = Modifier.width(Dimens.spaceXs))
+                                Text(stringResource(R.string.action_delete))
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(Dimens.spaceSm))
+
+                    val bandLabels = EffectDispatcher.eqBandLabelsForCount(bandCount)
+
+                    bandLabels.forEachIndexed { index, label ->
+                        if (index < localBands.size) {
+                            val applyBandChange = { newVal: Float ->
+                                localBands[index] = newVal.coerceIn(DB_MIN, DB_MAX)
+                                val str =
+                                    localBands.joinToString(";") {
+                                        String.format(Locale.US, "%.1f", it)
+                                    } + ";"
+                                onBandsChange(str)
+                            }
+
+                            Row(
+                                modifier =
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = Dimens.spaceXxs),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.width(48.dp),
+                                )
+                                Slider(
+                                    value = localBands[index],
+                                    onValueChange = { applyBandChange(it) },
+                                    valueRange = DB_MIN..DB_MAX,
+                                    modifier = Modifier.weight(1f),
+                                    colors =
+                                        SliderDefaults.colors(
+                                            activeTickColor = Color.Transparent,
+                                            inactiveTickColor = Color.Transparent,
+                                        ),
+                                )
+                                Text(
+                                    text = "${"%.1f".format(localBands[index])}dB",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.width(52.dp),
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(Dimens.spaceSm))
 
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Dimens.space),
+                    horizontalArrangement = Arrangement.End,
                 ) {
-                    TextButton(onClick = { showSaveDialog = true }) {
-                        Icon(
-                            Icons.Default.Add,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
+                    TextButton(onClick = onDismiss) {
                         Text(stringResource(R.string.action_save))
                     }
-                    TextButton(
-                        onClick = { presetId?.let { onPresetDelete(it) } },
-                        enabled = presetId != null,
-                    ) {
-                        Icon(
-                            Icons.Default.Delete,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(stringResource(R.string.action_delete))
-                    }
-                    TextButton(onClick = {
-                        for (i in localBands.indices) {
-                            localBands[i] = 0f
-                        }
-                        onReset()
-                    }) {
-                        Icon(
-                            Icons.Default.RestartAlt,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(stringResource(R.string.action_reset))
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                val bandLabels = EffectDispatcher.eqBandLabelsForCount(bandCount)
-
-                bandLabels.forEachIndexed { index, label ->
-                    if (index < localBands.size) {
-                        val atMin = localBands[index] <= DB_MIN
-                        val atMax = localBands[index] >= DB_MAX
-
-                        val applyBandChange = { newVal: Float ->
-                            localBands[index] = newVal.coerceIn(DB_MIN, DB_MAX)
-                            val str =
-                                localBands.joinToString(";") {
-                                    String.format(
-                                        Locale.US,
-                                        "%.1f",
-                                        it,
-                                    )
-                                } + ";"
-                            onBandsChange(str)
-                        }
-
-                        Row(
-                            modifier =
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = label,
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.width(48.dp),
-                            )
-                            IconButton(
-                                onClick = {
-                                    val stepped = ((localBands[index] * 10).roundToInt() - 1) / 10f
-                                    applyBandChange(stepped)
-                                },
-                                enabled = !atMin,
-                                modifier = Modifier.size(32.dp),
-                                colors =
-                                    IconButtonDefaults.iconButtonColors(
-                                        contentColor = MaterialTheme.colorScheme.primary,
-                                        disabledContentColor =
-                                            MaterialTheme.colorScheme.onSurface.copy(
-                                                alpha = 0.38f,
-                                            ),
-                                    ),
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Remove,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            }
-                            Slider(
-                                value = localBands[index],
-                                onValueChange = { applyBandChange(it) },
-                                valueRange = DB_MIN..DB_MAX,
-                                modifier = Modifier.weight(1f),
-                                colors =
-                                    SliderDefaults.colors(
-                                        activeTickColor = Color.Transparent,
-                                        inactiveTickColor = Color.Transparent,
-                                    ),
-                            )
-                            IconButton(
-                                onClick = {
-                                    val stepped = ((localBands[index] * 10).roundToInt() + 1) / 10f
-                                    applyBandChange(stepped)
-                                },
-                                enabled = !atMax,
-                                modifier = Modifier.size(32.dp),
-                                colors =
-                                    IconButtonDefaults.iconButtonColors(
-                                        contentColor = MaterialTheme.colorScheme.primary,
-                                        disabledContentColor =
-                                            MaterialTheme.colorScheme.onSurface.copy(
-                                                alpha = 0.38f,
-                                            ),
-                                    ),
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Add,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            }
-                            Text(
-                                text = "${"%.1f".format(localBands[index])}dB",
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.width(52.dp),
-                                maxLines = 1,
-                            )
-                        }
-                    }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(android.R.string.ok))
-            }
-        },
-    )
+        }
+    }
 
     if (showSaveDialog) {
         AlertDialog(

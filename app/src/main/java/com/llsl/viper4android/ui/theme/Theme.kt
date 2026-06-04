@@ -1,5 +1,6 @@
 package com.llsl.viper4android.ui.theme
 
+import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -8,7 +9,12 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 
 private val LightColorScheme =
     lightColorScheme(
@@ -36,6 +42,18 @@ private val LightColorScheme =
         onSurfaceVariant = md_theme_light_onSurfaceVariant,
         outline = md_theme_light_outline,
         outlineVariant = md_theme_light_outlineVariant,
+        scrim = md_theme_light_scrim,
+        inverseSurface = md_theme_light_inverseSurface,
+        inverseOnSurface = md_theme_light_inverseOnSurface,
+        inversePrimary = md_theme_light_inversePrimary,
+        surfaceTint = md_theme_light_primary,
+        surfaceDim = md_theme_light_surfaceDim,
+        surfaceBright = md_theme_light_surfaceBright,
+        surfaceContainerLowest = md_theme_light_surfaceContainerLowest,
+        surfaceContainerLow = md_theme_light_surfaceContainerLow,
+        surfaceContainer = md_theme_light_surfaceContainer,
+        surfaceContainerHigh = md_theme_light_surfaceContainerHigh,
+        surfaceContainerHighest = md_theme_light_surfaceContainerHighest,
     )
 
 private val DarkColorScheme =
@@ -64,8 +82,28 @@ private val DarkColorScheme =
         onSurfaceVariant = md_theme_dark_onSurfaceVariant,
         outline = md_theme_dark_outline,
         outlineVariant = md_theme_dark_outlineVariant,
+        scrim = md_theme_dark_scrim,
+        inverseSurface = md_theme_dark_inverseSurface,
+        inverseOnSurface = md_theme_dark_inverseOnSurface,
+        inversePrimary = md_theme_dark_inversePrimary,
+        surfaceTint = md_theme_dark_primary,
+        surfaceDim = md_theme_dark_surfaceDim,
+        surfaceBright = md_theme_dark_surfaceBright,
+        surfaceContainerLowest = md_theme_dark_surfaceContainerLowest,
+        surfaceContainerLow = md_theme_dark_surfaceContainerLow,
+        surfaceContainer = md_theme_dark_surfaceContainer,
+        surfaceContainerHigh = md_theme_dark_surfaceContainerHigh,
+        surfaceContainerHighest = md_theme_dark_surfaceContainerHighest,
     )
 
+/**
+ * The app theme.
+ *
+ * Defaults to Material You dynamic color so the UI follows the device's wallpaper/system palette,
+ * matching the reference app. On devices below Android 12 (where dynamic color isn't available) it
+ * falls back to the fixed lavender brand palette. Pass dynamicColor = false to force the brand
+ * palette everywhere.
+ */
 @Composable
 fun ViperTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -88,8 +126,23 @@ fun ViperTheme(
             }
         }
 
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as Activity).window
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !darkTheme
+                isAppearanceLightNavigationBars = !darkTheme
+            }
+            window.statusBarColor = Color.Transparent.toArgb()
+            window.navigationBarColor = Color.Transparent.toArgb()
+        }
+    }
+
     MaterialTheme(
         colorScheme = colorScheme,
+        typography = ViperTypography,
+        shapes = ViperShapes,
         content = content,
     )
 }

@@ -15,13 +15,15 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BasicAlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -40,6 +42,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.llsl.viper4android.R
+import com.llsl.viper4android.ui.theme.Dimens
 import com.llsl.viper4android.utils.FileLogger
 import com.llsl.viper4android.utils.RootShell
 import kotlinx.coroutines.Dispatchers
@@ -114,9 +117,12 @@ private enum class LogCategory(
             }
 
             CONFIG -> {
-                line.contains("Input ") || line.contains("Output ") ||
-                    line.contains("sampling") || line.contains("format") ||
-                    line.contains("channels") || line.contains("Config")
+                line.contains("Input ") ||
+                    line.contains("Output ") ||
+                    line.contains("sampling") ||
+                    line.contains("format") ||
+                    line.contains("channels") ||
+                    line.contains("Config")
             }
 
             COMMAND -> {
@@ -125,6 +131,7 @@ private enum class LogCategory(
         }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DebugLogDialog(
     clearTimestamp: Long,
@@ -229,18 +236,28 @@ fun DebugLogDialog(
         }
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.debug_log_title)) },
-        text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
+    BasicAlertDialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+        ) {
+            Column(
+                modifier = Modifier.padding(Dimens.dialogPadding),
+            ) {
+                Text(
+                    text = stringResource(R.string.debug_log_title),
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(bottom = Dimens.spaceMd),
+                )
+
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
                     modifier =
                         Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 8.dp),
+                            .padding(bottom = Dimens.spaceSm),
                     placeholder = { Text(stringResource(R.string.debug_search_hint)) },
                     leadingIcon = {
                         Icon(
@@ -263,8 +280,8 @@ fun DebugLogDialog(
                         Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState())
-                            .padding(bottom = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            .padding(bottom = Dimens.spaceXs),
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.spaceXs),
                 ) {
                     LogSource.entries.forEach { source ->
                         FilterChip(
@@ -291,8 +308,8 @@ fun DebugLogDialog(
                         Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState())
-                            .padding(bottom = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            .padding(bottom = Dimens.spaceXs),
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.spaceXs),
                 ) {
                     LogLevel.entries.forEach { level ->
                         FilterChip(
@@ -319,8 +336,8 @@ fun DebugLogDialog(
                         Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState())
-                            .padding(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            .padding(bottom = Dimens.spaceSm),
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.spaceXs),
                 ) {
                     LogCategory.entries.forEach { category ->
                         FilterChip(
@@ -341,49 +358,59 @@ fun DebugLogDialog(
                     text = "${filteredLines.size} / ${allLines.size}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 4.dp),
+                    modifier = Modifier.padding(bottom = Dimens.spaceXs),
                 )
 
-                LazyColumn(
-                    state = listState,
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    LazyColumn(
+                        state = listState,
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .height(320.dp)
+                                .padding(Dimens.spaceSm),
+                    ) {
+                        items(filteredLines) { line ->
+                            Text(
+                                text = line,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 10.sp,
+                                color = colorForLogLine(line),
+                                modifier = Modifier.padding(vertical = 1.dp),
+                            )
+                        }
+                    }
+                }
+
+                Row(
                     modifier =
                         Modifier
                             .fillMaxWidth()
-                            .height(320.dp),
+                            .padding(top = Dimens.spaceSm),
+                    horizontalArrangement = Arrangement.End,
                 ) {
-                    items(filteredLines) { line ->
-                        Text(
-                            text = line,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 10.sp,
-                            color = colorForLogLine(line),
-                            modifier = Modifier.padding(vertical = 1.dp),
-                        )
+                    TextButton(onClick = onDisableDebug) {
+                        Text(stringResource(R.string.debug_disable_debug))
+                    }
+                    TextButton(onClick = {
+                        scope.launch {
+                            withContext(Dispatchers.IO) { FileLogger.clearLogs() }
+                        }
+                        onClear()
+                    }) {
+                        Text(stringResource(R.string.action_clear))
+                    }
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.action_close))
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.action_close))
-            }
-        },
-        dismissButton = {
-            Row {
-                TextButton(onClick = onDisableDebug) {
-                    Text(stringResource(R.string.debug_disable_debug))
-                }
-                TextButton(onClick = {
-                    scope.launch {
-                        withContext(Dispatchers.IO) { FileLogger.clearLogs() }
-                    }
-                    onClear()
-                }) {
-                    Text(stringResource(R.string.action_clear))
-                }
-            }
-        },
-    )
+        }
+    }
 }
 
 private fun colorForSource(source: LogSource): Color =

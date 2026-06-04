@@ -2,12 +2,8 @@ package com.llsl.viper4android.ui.screens.main
 
 import android.app.Application
 import android.app.NotificationManager
-import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
-import android.content.ServiceConnection
 import android.net.Uri
-import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -24,9 +20,11 @@ import com.llsl.viper4android.data.model.DsPreset
 import com.llsl.viper4android.data.model.EqPreset
 import com.llsl.viper4android.data.model.Preset
 import com.llsl.viper4android.data.repository.ViperRepository
+import com.llsl.viper4android.domain.audio.AudioParameterGateway
+import com.llsl.viper4android.domain.file.AudioFileManager
+import com.llsl.viper4android.domain.preset.PresetImportManager
 import com.llsl.viper4android.service.ViperService
 import com.llsl.viper4android.utils.FileLogger
-import com.llsl.viper4android.utils.RootShell
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -42,10 +40,7 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.Locale
-import java.util.zip.CRC32
 import javax.inject.Inject
 
 data class DriverStatus(
@@ -53,6 +48,7 @@ data class DriverStatus(
     val versionCode: Int = -1,
     val versionName: String = "",
     val architecture: String = "",
+    val aidlMode: Boolean = false,
     val streaming: Boolean = false,
     val samplingRate: Int = 0,
 )
@@ -95,6 +91,9 @@ class MainViewModel
     constructor(
         application: Application,
         private val repository: ViperRepository,
+        private val fileManager: AudioFileManager,
+        private val presetImportManager: PresetImportManager,
+        private val gateway: AudioParameterGateway,
     ) : AndroidViewModel(application) {
         companion object {
             const val PREF_AUTO_START = "auto_start"
@@ -138,8 +137,12 @@ class MainViewModel
         private val _debugModeEnabled = MutableStateFlow(false)
         val debugModeEnabled: StateFlow<Boolean> = _debugModeEnabled.asStateFlow()
 
-        private var viperService: ViperService? = null
-        private var serviceBound = false
+        /**
+         * The bound service, reached through the gateway. Calls that need UI types
+         * (`dispatchFullState`, `getActiveEffect`) talk to the service through this accessor, while
+         * the plainer dispatch primitives go through [gateway] directly.
+         */
+        private val viperService: ViperService? get() = gateway.boundService
         private val audioOutputDetector = AudioOutputDetector(application)
         private var activeDeviceType: Int = ViperParams.FX_TYPE_HEADPHONE
         private val editingFxType: Int get() = _uiState.value.fxType
@@ -147,25 +150,6 @@ class MainViewModel
         private var eqPresetsJob: Job? = null
         private var spkEqPresetsJob: Job? = null
         private var dsPresetsJob: Job? = null
-
-        private val serviceConnection =
-            object : ServiceConnection {
-                override fun onServiceConnected(
-                    name: ComponentName?,
-                    binder: IBinder?,
-                ) {
-                    val localBinder = binder as? ViperService.LocalBinder ?: return
-                    viperService = localBinder.service
-                    serviceBound = true
-                    applyFullState()
-                    queryDriverStatus()
-                }
-
-                override fun onServiceDisconnected(name: ComponentName?) {
-                    viperService = null
-                    serviceBound = false
-                }
-            }
 
         init {
             loadSettingsPreferences()
@@ -235,11 +219,12 @@ class MainViewModel
         }
 
         private fun bindToService() {
-            val intent = Intent(getApplication(), ViperService::class.java)
-            getApplication<Application>().bindService(
-                intent,
-                serviceConnection,
-                Context.BIND_AUTO_CREATE,
+            gateway.bind(
+                onConnected = {
+                    applyFullState()
+                    queryDriverStatus()
+                },
+                onDisconnected = {},
             )
         }
 
@@ -247,11 +232,7 @@ class MainViewModel
             super.onCleared()
             runBlocking(Dispatchers.IO) { saveCurrentDeviceSettings() }
             audioOutputDetector.stop()
-            if (serviceBound) {
-                getApplication<Application>().unbindService(serviceConnection)
-                serviceBound = false
-            }
-            viperService = null
+            gateway.unbind()
         }
 
         private suspend fun loadInitialState() {
@@ -396,91 +377,9 @@ class MainViewModel
             )
         }
 
-        private fun prepareDdcByteArray(name: String): ByteArrayParam? {
-            return try {
-                val file = File(getFilesDir("DDC"), "$name.vdc")
-                FileLogger.i(
-                    "ViewModel",
-                    "prepareDdc: file=${file.absolutePath} exists=${file.exists()}",
-                )
-                if (!file.exists()) return null
-                val lines = file.readLines()
-                var coeffs44100: FloatArray? = null
-                var coeffs48000: FloatArray? = null
-                for (line in lines) {
-                    val trimmed = line.trim()
-                    when {
-                        trimmed.startsWith("SR_44100:") -> {
-                            coeffs44100 =
-                                trimmed
-                                    .removePrefix("SR_44100:")
-                                    .split(",")
-                                    .map { it.trim().toFloat() }
-                                    .toFloatArray()
-                        }
+        private fun prepareDdcByteArray(name: String): ByteArrayParam? = fileManager.prepareDdcByteArray(name)
 
-                        trimmed.startsWith("SR_48000:") -> {
-                            coeffs48000 =
-                                trimmed
-                                    .removePrefix("SR_48000:")
-                                    .split(",")
-                                    .map { it.trim().toFloat() }
-                                    .toFloatArray()
-                        }
-                    }
-                }
-                if (coeffs44100 == null || coeffs48000 == null) return null
-                if (coeffs44100.size != coeffs48000.size) return null
-                if (coeffs44100.size % 5 != 0) return null
-                val arrSize = coeffs44100.size
-                val naturalSize = 4 + arrSize * 4 * 2
-                val wireSize =
-                    when {
-                        naturalSize <= 256 -> 256
-                        naturalSize <= 1024 -> 1024
-                        else -> return null
-                    }
-                val buffer = ByteBuffer.allocate(wireSize).order(ByteOrder.LITTLE_ENDIAN)
-                buffer.putInt(arrSize)
-                for (f in coeffs44100) buffer.putFloat(f)
-                for (f in coeffs48000) buffer.putFloat(f)
-                ByteArrayParam(ViperParams.PARAM_HP_DDC_COEFFICIENTS, buffer.array())
-            } catch (e: Exception) {
-                FileLogger.e("ViewModel", "Failed to prepare DDC: $name", e)
-                null
-            }
-        }
-
-        private fun prepareConvolverByteArray(fileName: String): ByteArrayParam? {
-            if (!_aidlModeEnabled.value) return null
-            return try {
-                val file = File(getFilesDir("Kernel"), fileName)
-                FileLogger.i(
-                    "ViewModel",
-                    "prepareConvolver: file=${file.absolutePath} exists=${file.exists()}",
-                )
-                if (!file.exists()) return null
-                val safeName = fileName.replace("'", "")
-                val subDir = if (activeDeviceType == ViperParams.FX_TYPE_SPEAKER) "spk" else "hp"
-                val kernelPath = "/data/local/tmp/v4a/$subDir/$safeName"
-                RootShell.copyFile(file, kernelPath)
-                FileLogger.i("ViewModel", "Kernel copied to $kernelPath (for full state)")
-                val param =
-                    if (activeDeviceType == ViperParams.FX_TYPE_SPEAKER) {
-                        ViperParams.PARAM_SPK_CONVOLVER_SET_KERNEL
-                    } else {
-                        ViperParams.PARAM_HP_CONVOLVER_SET_KERNEL
-                    }
-                val pathBytes = kernelPath.toByteArray(Charsets.UTF_8)
-                val buffer = ByteBuffer.allocate(256).order(ByteOrder.LITTLE_ENDIAN)
-                buffer.putInt(pathBytes.size)
-                buffer.put(pathBytes)
-                ByteArrayParam(param, buffer.array())
-            } catch (e: Exception) {
-                FileLogger.e("ViewModel", "Failed to prepare kernel: $fileName", e)
-                null
-            }
-        }
+        private fun prepareConvolverByteArray(fileName: String): ByteArrayParam? = fileManager.prepareConvolverByteArray(fileName, activeDeviceType, _aidlModeEnabled.value)
 
         private fun parseInts(
             s: String,
@@ -4255,11 +4154,7 @@ class MainViewModel
             }
         }
 
-        private fun getFilesDir(subDir: String): File {
-            val dir = File(getApplication<Application>().getExternalFilesDir(null), subDir)
-            if (!dir.exists()) dir.mkdirs()
-            return dir
-        }
+        private fun getFilesDir(subDir: String): File = fileManager.getFilesDir(subDir)
 
         private fun updateImportProgress(
             title: String,
@@ -4305,27 +4200,7 @@ class MainViewModel
             uri: Uri,
             destDir: File,
             fallbackName: String,
-        ): File? {
-            val context = getApplication<Application>()
-            val fileName =
-                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                    val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                    if (cursor.moveToFirst() && nameIndex >= 0) cursor.getString(nameIndex) else null
-                } ?: fallbackName
-            val destFile = File(destDir, fileName)
-            return try {
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    FileOutputStream(destFile).use { output ->
-                        input.copyTo(output)
-                        output.fd.sync()
-                    }
-                }
-                destFile
-            } catch (e: Exception) {
-                FileLogger.e("ViewModel", "Failed to copy file", e)
-                null
-            }
-        }
+        ): File? = fileManager.copyUriToFile(uri, destDir, fallbackName)
 
         fun importPresetFiles(
             uris: List<Uri>,
@@ -4336,77 +4211,29 @@ class MainViewModel
             viewModelScope.launch(Dispatchers.IO) {
                 val total = uris.size
                 val showProgress = total > 10
-                val destDir = getFilesDir("Preset")
-                var count = 0
-                var lastJson: String? = null
-                var lastFxType: Int = ViperParams.FX_TYPE_HEADPHONE
-                for ((index, uri) in uris.withIndex()) {
-                    try {
-                        val destFile =
-                            if (uri.toString().endsWith(".xml", true)) {
-                                val raw =
-                                    getApplication<Application>()
-                                        .contentResolver
-                                        .openInputStream(uri)
-                                        ?.bufferedReader()
-                                        .use { it?.readText() }
-                                        ?: throw Exception("Failed to read XML preset")
-                                val isSpk = ViperXmlPreset.isSpeaker(raw, uri.lastPathSegment ?: "preset.xml")
-                                val json = ViperXmlPreset.toJson(raw, isSpk).toString()
-                                val presetName = uri.path?.substringAfterLast("/") ?: "import_$index.xml"
-                                val destFile = File(destDir, presetName.replace(".xml", ".json"))
-                                FileOutputStream(destFile).use { fos ->
-                                    fos.write(json.toByteArray(Charsets.UTF_8))
-                                    fos.fd.sync()
+                val count =
+                    presetImportManager.importPresets(
+                        uris = uris,
+                        xmlToJson = { raw, fileName ->
+                            val content = String(raw, Charsets.UTF_8)
+                            val isSpk = ViperXmlPreset.isSpeaker(content, fileName)
+                            ViperXmlPreset.toJson(content, isSpk).toString()
+                        },
+                        isSpeakerXml = { raw, fileName ->
+                            ViperXmlPreset.isSpeaker(String(raw, Charsets.UTF_8), fileName)
+                        },
+                        onProgress = { current, t -> updateImportProgress(notificationTitle, current, t) },
+                        onSinglePresetImported = { json, fxType ->
+                            viewModelScope.launch(Dispatchers.Main) {
+                                deserializeAndApplyStateForMode(json, fxType)
+                                viewModelScope.launch { persistStateForMode(fxType) }
+                                if (fxType == activeDeviceType) {
+                                    applyFullState()
                                 }
-                                destFile
-                            } else {
-                                val destFile = copyUriToFile(uri, destDir, "import_$index.json")
-                                destFile
                             }
-                        if (destFile != null) {
-                            val json = destFile.readText()
-                            val obj = JSONObject(json)
-                            val isSpk = obj.has("spkMasterEnabled") && !obj.has("masterEnabled")
-                            val fxType = if (isSpk) ViperParams.FX_TYPE_SPEAKER else ViperParams.FX_TYPE_HEADPHONE
-                            val presetName = destFile.nameWithoutExtension
-                            val existing = repository.getPresetByNameAndFxType(presetName, fxType)
-                            if (existing != null) {
-                                repository.updatePreset(
-                                    existing.copy(settingsJson = json, updatedAt = System.currentTimeMillis()),
-                                )
-                            } else {
-                                repository.savePreset(
-                                    Preset(
-                                        name = presetName,
-                                        fxType = fxType,
-                                        settingsJson = json,
-                                    ),
-                                )
-                            }
-                            count++
-                            lastJson = json
-                            lastFxType = fxType
-                        }
-                    } catch (e: Exception) {
-                        FileLogger.e("ViewModel", "Failed to import preset from $uri", e)
-                    }
-                    if (showProgress && ((index + 1) % 5 == 0 || index + 1 == total)) {
-                        updateImportProgress(notificationTitle, index + 1, total)
-                    }
-                }
+                        },
+                    )
                 if (showProgress) completeImportProgress(notificationTitle, "$successStr: $count / $total")
-                if (total == 1 && count == 1 && lastJson != null) {
-                    val applyJson = lastJson
-                    val applyFxType = lastFxType
-                    launch(Dispatchers.Main) {
-                        deserializeAndApplyStateForMode(applyJson, applyFxType)
-                        viewModelScope.launch { persistStateForMode(applyFxType) }
-                        if (applyFxType == activeDeviceType) {
-                            applyFullState()
-                        }
-                    }
-                }
                 launch(Dispatchers.Main) { onResult(count > 0) }
             }
         }
@@ -4420,18 +4247,10 @@ class MainViewModel
             viewModelScope.launch(Dispatchers.IO) {
                 val total = uris.size
                 val showProgress = total > 50
-                val destDir = getFilesDir("Kernel")
-                var count = 0
-                for ((index, uri) in uris.withIndex()) {
-                    try {
-                        if (copyUriToFile(uri, destDir, "kernel_$count.wav") != null) count++
-                    } catch (e: Exception) {
-                        FileLogger.e("ViewModel", "Failed to import kernel from $uri", e)
+                val count =
+                    presetImportManager.importKernels(uris) { current, t ->
+                        updateImportProgress(notificationTitle, current, t)
                     }
-                    if (showProgress && ((index + 1) % 10 == 0 || index + 1 == total)) {
-                        updateImportProgress(notificationTitle, index + 1, total)
-                    }
-                }
                 if (showProgress) completeImportProgress(notificationTitle, "$successStr: $count / $total")
                 if (count > 0) refreshFileLists()
                 launch(Dispatchers.Main) { onResult(count > 0) }
@@ -4447,18 +4266,10 @@ class MainViewModel
             viewModelScope.launch(Dispatchers.IO) {
                 val total = uris.size
                 val showProgress = total > 50
-                val destDir = getFilesDir("DDC")
-                var count = 0
-                for ((index, uri) in uris.withIndex()) {
-                    try {
-                        if (copyUriToFile(uri, destDir, "imported_$count.vdc") != null) count++
-                    } catch (e: Exception) {
-                        FileLogger.e("ViewModel", "Failed to import VDC from $uri", e)
+                val count =
+                    presetImportManager.importVdcs(uris) { current, t ->
+                        updateImportProgress(notificationTitle, current, t)
                     }
-                    if (showProgress && ((index + 1) % 10 == 0 || index + 1 == total)) {
-                        updateImportProgress(notificationTitle, index + 1, total)
-                    }
-                }
                 if (showProgress) completeImportProgress(notificationTitle, "$successStr: $count / $total")
                 if (count > 0) refreshFileLists()
                 launch(Dispatchers.Main) { onResult(count > 0) }
@@ -4466,352 +4277,74 @@ class MainViewModel
         }
 
         fun refreshFileLists() {
-            val ddcDir = getFilesDir("DDC")
-            _vdcFileList.value = ddcDir
-                .listFiles()
-                ?.filter { it.extension == "vdc" }
-                ?.map { it.nameWithoutExtension }
-                ?.sorted() ?: emptyList()
-
-            val kernelDir = getFilesDir("Kernel")
-            _kernelFileList.value = kernelDir
-                .listFiles()
-                ?.map { it.name }
-                ?.sorted() ?: emptyList()
+            _vdcFileList.value = fileManager.listVdcNames()
+            _kernelFileList.value = fileManager.listKernelNames()
         }
 
         fun deleteVdcFile(name: String): Boolean {
-            return try {
-                val file = File(getFilesDir("DDC"), "$name.vdc")
-                if (!file.exists()) return false
-                file.delete()
-                val state = _uiState.value
-                if (state.ddc.hp.device == name) {
-                    _uiState.update { it.copy(ddc = it.ddc.copy(hp = it.ddc.hp.copy(device = ""))) }
-                    viewModelScope.launch {
-                        repository.setStringPreference(ViperRepository.PREF_DDC_DEVICE, "")
-                    }
+            if (!fileManager.deleteVdcFile(name)) return false
+            val state = _uiState.value
+            if (state.ddc.hp.device == name) {
+                _uiState.update { it.copy(ddc = it.ddc.copy(hp = it.ddc.hp.copy(device = ""))) }
+                viewModelScope.launch {
+                    repository.setStringPreference(ViperRepository.PREF_DDC_DEVICE, "")
                 }
-                if (state.ddc.spk.device == name) {
-                    _uiState.update { it.copy(ddc = it.ddc.copy(spk = it.ddc.spk.copy(device = ""))) }
-                    viewModelScope.launch {
-                        repository.setStringPreference("spk_${ViperRepository.PREF_DDC_DEVICE}", "")
-                    }
-                }
-                refreshFileLists()
-                true
-            } catch (e: Exception) {
-                FileLogger.e("ViewModel", "Failed to delete VDC: $name", e)
-                false
             }
+            if (state.ddc.spk.device == name) {
+                _uiState.update { it.copy(ddc = it.ddc.copy(spk = it.ddc.spk.copy(device = ""))) }
+                viewModelScope.launch {
+                    repository.setStringPreference("spk_${ViperRepository.PREF_DDC_DEVICE}", "")
+                }
+            }
+            refreshFileLists()
+            return true
         }
 
         fun deleteKernelFile(fileName: String): Boolean {
-            return try {
-                val file = File(getFilesDir("Kernel"), fileName)
-                if (!file.exists()) return false
-                file.delete()
-                val state = _uiState.value
-                if (state.convolver.hp.kernel == fileName) {
-                    _uiState.update {
-                        it.copy(convolver = it.convolver.copy(hp = it.convolver.hp.copy(kernel = "")))
-                    }
-                    viewModelScope.launch {
-                        repository.setStringPreference(
-                            "${ViperParams.PARAM_HP_CONVOLVER_SET_KERNEL}",
-                            "",
-                        )
-                    }
+            if (!fileManager.deleteKernelFile(fileName)) return false
+            val state = _uiState.value
+            if (state.convolver.hp.kernel == fileName) {
+                _uiState.update {
+                    it.copy(convolver = it.convolver.copy(hp = it.convolver.hp.copy(kernel = "")))
                 }
-                if (state.convolver.spk.kernel == fileName) {
-                    _uiState.update {
-                        it.copy(convolver = it.convolver.copy(spk = it.convolver.spk.copy(kernel = "")))
-                    }
-                    viewModelScope.launch {
-                        repository.setStringPreference(
-                            "spk_${ViperParams.PARAM_HP_CONVOLVER_SET_KERNEL}",
-                            "",
-                        )
-                    }
+                viewModelScope.launch {
+                    repository.setStringPreference(
+                        "${ViperParams.PARAM_HP_CONVOLVER_SET_KERNEL}",
+                        "",
+                    )
                 }
-                refreshFileLists()
-                true
-            } catch (e: Exception) {
-                FileLogger.e("ViewModel", "Failed to delete kernel: $fileName", e)
-                false
             }
+            if (state.convolver.spk.kernel == fileName) {
+                _uiState.update {
+                    it.copy(convolver = it.convolver.copy(spk = it.convolver.spk.copy(kernel = "")))
+                }
+                viewModelScope.launch {
+                    repository.setStringPreference(
+                        "spk_${ViperParams.PARAM_HP_CONVOLVER_SET_KERNEL}",
+                        "",
+                    )
+                }
+            }
+            refreshFileLists()
+            return true
         }
 
         fun loadVdcByName(
             name: String,
             enableParam: Int? = null,
-        ): Boolean {
-            FileLogger.i("ViewModel", "Loading DDC: $name")
-            return try {
-                val file = File(getFilesDir("DDC"), "$name.vdc")
-                if (!file.exists()) return false
-                val lines = file.readLines()
-
-                var coeffs44100: FloatArray? = null
-                var coeffs48000: FloatArray? = null
-
-                for (line in lines) {
-                    val trimmed = line.trim()
-                    when {
-                        trimmed.startsWith("SR_44100:") -> {
-                            coeffs44100 =
-                                trimmed
-                                    .removePrefix("SR_44100:")
-                                    .split(",")
-                                    .map { it.trim().toFloat() }
-                                    .toFloatArray()
-                        }
-
-                        trimmed.startsWith("SR_48000:") -> {
-                            coeffs48000 =
-                                trimmed
-                                    .removePrefix("SR_48000:")
-                                    .split(",")
-                                    .map { it.trim().toFloat() }
-                                    .toFloatArray()
-                        }
-                    }
-                }
-
-                if (coeffs44100 == null || coeffs48000 == null) return false
-                if (coeffs44100.size != coeffs48000.size) return false
-                if (coeffs44100.size % 5 != 0) return false
-
-                val arrSize = coeffs44100.size
-                val naturalSize = 4 + arrSize * 4 * 2
-                val wireSize =
-                    when {
-                        naturalSize <= 256 -> 256
-                        naturalSize <= 1024 -> 1024
-                        else -> return false
-                    }
-                val buffer = ByteBuffer.allocate(wireSize).order(ByteOrder.LITTLE_ENDIAN)
-                buffer.putInt(arrSize)
-                for (f in coeffs44100) buffer.putFloat(f)
-                for (f in coeffs48000) buffer.putFloat(f)
-
-                val service = viperService ?: return false
-                val extras =
-                    if (enableParam != null) listOf(ParamEntry(enableParam, intArrayOf(1))) else null
-                service.dispatchParam(ViperParams.PARAM_HP_DDC_COEFFICIENTS, buffer.array(), extras)
-                true
-            } catch (e: Exception) {
-                FileLogger.e("ViewModel", "Failed to load VDC: $name", e)
-                false
-            }
-        }
+        ): Boolean = fileManager.loadVdcByName(name, gateway, enableParam)
 
         fun loadKernelByName(
             fileName: String,
             enableParam: Int? = null,
-        ): Boolean {
-            FileLogger.i("ViewModel", "Loading convolver kernel: $fileName")
-            return try {
-                val file = File(getFilesDir("Kernel"), fileName)
-                if (!file.exists()) return false
-
-                if (_aidlModeEnabled.value) {
-                    return loadKernelViaFile(file, fileName, enableParam)
-                }
-
-                val wavBytes = file.readBytes()
-                val floatSamples = decodeWavToFloat(wavBytes) ?: return false
-                val channelCount = getWavChannelCount(wavBytes)
-                val totalFloats = floatSamples.size
-                FileLogger.i(
-                    "ViewModel",
-                    "Kernel loaded: $fileName samples=$totalFloats ch=$channelCount",
-                )
-
-                val service = viperService ?: return false
-
-                val prepareParam =
-                    if (activeDeviceType == ViperParams.FX_TYPE_SPEAKER) {
-                        ViperParams.PARAM_SPK_CONVOLVER_PREPARE_BUFFER
-                    } else {
-                        ViperParams.PARAM_HP_CONVOLVER_PREPARE_BUFFER
-                    }
-                val setParam =
-                    if (activeDeviceType == ViperParams.FX_TYPE_SPEAKER) {
-                        ViperParams.PARAM_SPK_CONVOLVER_SET_BUFFER
-                    } else {
-                        ViperParams.PARAM_HP_CONVOLVER_SET_BUFFER
-                    }
-                val commitParam =
-                    if (activeDeviceType == ViperParams.FX_TYPE_SPEAKER) {
-                        ViperParams.PARAM_SPK_CONVOLVER_COMMIT_BUFFER
-                    } else {
-                        ViperParams.PARAM_HP_CONVOLVER_COMMIT_BUFFER
-                    }
-
-                service.dispatchParam(prepareParam, totalFloats, channelCount, 0)
-
-                val floatBytes = ByteBuffer.allocate(totalFloats * 4).order(ByteOrder.LITTLE_ENDIAN)
-                for (f in floatSamples) floatBytes.putFloat(f)
-                val rawBytes = floatBytes.array()
-
-                val crc = CRC32()
-                crc.update(rawBytes)
-                val crcValue = crc.value.toInt()
-
-                val maxFloatsPerChunk = 2046
-                var offset = 0
-                var chunkIndex = 0
-                while (offset < totalFloats) {
-                    val remaining = totalFloats - offset
-                    val floatsInChunk = minOf(remaining, maxFloatsPerChunk)
-                    val chunkByteCount = floatsInChunk * 4
-
-                    val chunkBuffer = ByteBuffer.allocate(8192).order(ByteOrder.LITTLE_ENDIAN)
-                    chunkBuffer.putInt(chunkIndex)
-                    chunkBuffer.putInt(floatsInChunk)
-                    chunkBuffer.put(rawBytes, offset * 4, chunkByteCount)
-
-                    service.dispatchParam(setParam, chunkBuffer.array())
-                    offset += floatsInChunk
-                    chunkIndex++
-                }
-
-                val kernelId = fileName.hashCode()
-                service.dispatchParam(commitParam, totalFloats, crcValue, kernelId)
-                true
-            } catch (e: Exception) {
-                FileLogger.e("ViewModel", "Failed to load kernel: $fileName", e)
-                false
-            }
-        }
-
-        private fun loadKernelViaFile(
-            file: File,
-            fileName: String,
-            enableParam: Int? = null,
-        ): Boolean {
-            return try {
-                val safeName = fileName.replace("'", "")
-                val subDir = if (activeDeviceType == ViperParams.FX_TYPE_SPEAKER) "spk" else "hp"
-                val kernelPath = "/data/local/tmp/v4a/$subDir/$safeName"
-                RootShell.copyFile(file, kernelPath)
-                FileLogger.i("ViewModel", "Kernel copied to $kernelPath")
-
-                val param =
-                    if (activeDeviceType == ViperParams.FX_TYPE_SPEAKER) {
-                        ViperParams.PARAM_SPK_CONVOLVER_SET_KERNEL
-                    } else {
-                        ViperParams.PARAM_HP_CONVOLVER_SET_KERNEL
-                    }
-                val pathBytes = kernelPath.toByteArray(Charsets.UTF_8)
-                val buffer = ByteBuffer.allocate(256).order(ByteOrder.LITTLE_ENDIAN)
-                buffer.putInt(pathBytes.size)
-                buffer.put(pathBytes)
-                val service = viperService ?: return false
-                val extras =
-                    if (enableParam != null) listOf(ParamEntry(enableParam, intArrayOf(1))) else null
-                service.dispatchParam(param, buffer.array(), extras)
-                true
-            } catch (e: Exception) {
-                FileLogger.e("ViewModel", "Failed to load kernel via file: $fileName", e)
-                false
-            }
-        }
-
-        private fun getWavChannelCount(wavBytes: ByteArray): Int {
-            if (wavBytes.size < 44) return 1
-            val buf = ByteBuffer.wrap(wavBytes).order(ByteOrder.LITTLE_ENDIAN)
-            buf.position(22)
-            return buf.short.toInt()
-        }
-
-        private fun decodeWavToFloat(wavBytes: ByteArray): FloatArray? {
-            if (wavBytes.size < 44) return null
-            val buf = ByteBuffer.wrap(wavBytes).order(ByteOrder.LITTLE_ENDIAN)
-
-            val riff = ByteArray(4)
-            buf.get(riff)
-            if (String(riff) != "RIFF") return null
-            buf.int
-            val wave = ByteArray(4)
-            buf.get(wave)
-            if (String(wave) != "WAVE") return null
-
-            var audioFormat = 0
-            var numChannels = 0
-            var bitsPerSample = 0
-            var dataBytes: ByteArray? = null
-
-            while (buf.remaining() >= 8) {
-                val chunkId = ByteArray(4)
-                buf.get(chunkId)
-                val chunkSize = buf.int
-                val chunkIdStr = String(chunkId)
-
-                when (chunkIdStr) {
-                    "fmt " -> {
-                        val fmtStart = buf.position()
-                        audioFormat = buf.short.toInt() and 0xFFFF
-                        numChannels = buf.short.toInt() and 0xFFFF
-                        buf.int
-                        buf.int
-                        buf.short
-                        bitsPerSample = buf.short.toInt() and 0xFFFF
-                        buf.position(fmtStart + chunkSize)
-                    }
-
-                    "data" -> {
-                        val safeSize = minOf(chunkSize, buf.remaining())
-                        dataBytes = ByteArray(safeSize)
-                        buf.get(dataBytes)
-                    }
-
-                    else -> {
-                        val skip = minOf(chunkSize, buf.remaining())
-                        buf.position(buf.position() + skip)
-                    }
-                }
-            }
-
-            val data = dataBytes ?: return null
-            if (numChannels !in 1..2) return null
-
-            val dataBuf = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
-            val bytesPerSample = bitsPerSample / 8
-            if (bytesPerSample == 0) return null
-            val totalSamples = data.size / bytesPerSample
-            val result = FloatArray(totalSamples)
-
-            when {
-                audioFormat == 1 && bitsPerSample == 16 -> {
-                    for (i in 0 until totalSamples) result[i] = dataBuf.short.toFloat() / (1 shl 15)
-                }
-
-                audioFormat == 1 && bitsPerSample == 24 -> {
-                    for (i in 0 until totalSamples) {
-                        val b0 = dataBuf.get().toInt() and 0xFF
-                        val b1 = dataBuf.get().toInt() and 0xFF
-                        val b2 = dataBuf.get().toInt()
-                        result[i] = ((b2 shl 16) or (b1 shl 8) or b0).toFloat() / (1 shl 23)
-                    }
-                }
-
-                audioFormat == 1 && bitsPerSample == 32 -> {
-                    for (i in 0 until totalSamples) result[i] = dataBuf.int.toFloat() / (1L shl 31)
-                }
-
-                audioFormat == 3 && bitsPerSample == 32 -> {
-                    for (i in 0 until totalSamples) result[i] = dataBuf.float
-                }
-
-                else -> {
-                    return null
-                }
-            }
-
-            return result
-        }
+        ): Boolean =
+            fileManager.loadKernelByName(
+                fileName,
+                gateway,
+                activeDeviceType,
+                _aidlModeEnabled.value,
+                enableParam,
+            )
 
         private suspend fun persistStateForMode(fxType: Int) {
             val state = _uiState.value
@@ -4963,6 +4496,7 @@ class MainViewModel
                     versionCode = status.versionCode,
                     versionName = status.versionName,
                     architecture = status.architecture,
+                    aidlMode = _aidlModeEnabled.value,
                     streaming = status.streaming,
                     samplingRate = status.sampleRate,
                 )
@@ -4989,6 +4523,7 @@ class MainViewModel
                     versionCode = versionCode,
                     versionName = versionName,
                     architecture = archName,
+                    aidlMode = _aidlModeEnabled.value,
                     streaming = streaming,
                     samplingRate = samplingRate,
                 )
@@ -5033,7 +4568,7 @@ class MainViewModel
             param: Int,
             value: Int,
         ) {
-            viperService?.dispatchParam(param, value)
+            gateway.dispatchParam(param, value)
         }
 
         private fun dispatchEqBands(
@@ -5042,6 +4577,6 @@ class MainViewModel
             bandCountParam: Int = 0,
             bandCount: Int = 0,
         ) {
-            viperService?.dispatchEqBands(param, bandsString, bandCountParam, bandCount)
+            gateway.dispatchEqBands(param, bandsString, bandCountParam, bandCount)
         }
     }
